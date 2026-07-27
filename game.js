@@ -609,7 +609,45 @@ window.addEventListener("keydown", e => {
 });
 window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 
+// ---- virtual joystick (phones / tablets) ----
+// Touch anywhere on the map: the stick appears under your finger; drag to move.
+const JOY_R = 60;
+const joy = { active: false, id: -1, bx: 0, by: 0, dx: 0, dy: 0 };
+function joyStart(e) {
+  if (Client.screen !== "game") return;
+  for (const t of e.changedTouches) {
+    if (joy.active) continue;
+    joy.active = true; joy.id = t.identifier;
+    joy.bx = t.clientX; joy.by = t.clientY;
+    joy.dx = 0; joy.dy = 0;
+  }
+  e.preventDefault();
+}
+function joyMove(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier !== joy.id) continue;
+    let dx = t.clientX - joy.bx, dy = t.clientY - joy.by;
+    const l = Math.hypot(dx, dy);
+    if (l > JOY_R) { dx = dx / l * JOY_R; dy = dy / l * JOY_R; }
+    joy.dx = dx / JOY_R; joy.dy = dy / JOY_R;
+  }
+  e.preventDefault();
+}
+function joyEnd(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier !== joy.id) continue;
+    joy.active = false; joy.id = -1; joy.dx = 0; joy.dy = 0;
+  }
+  e.preventDefault();
+}
+
 function moveDir() {
+  if (joy.active && Math.hypot(joy.dx, joy.dy) > 0.18) {
+    let dx = joy.dx, dy = joy.dy;
+    const l = Math.hypot(dx, dy);
+    if (l > 1) { dx /= l; dy /= l; }
+    return [dx, dy];
+  }
   let dx = 0, dy = 0;
   if (keys["w"] || keys["arrowup"]) dy -= 1;
   if (keys["s"] || keys["arrowdown"]) dy += 1;
@@ -691,6 +729,10 @@ function resizeCanvas() {
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
+cv.addEventListener("touchstart", joyStart, { passive: false });
+cv.addEventListener("touchmove", joyMove, { passive: false });
+cv.addEventListener("touchend", joyEnd, { passive: false });
+cv.addEventListener("touchcancel", joyEnd, { passive: false });
 
 // starfield
 const STARS = [];
@@ -855,6 +897,18 @@ function draw() {
     ctx.drawImage(visCv, 0, 0);
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // virtual joystick (screen space)
+  if (joy.active) {
+    ctx.globalAlpha = 0.28;
+    ctx.beginPath(); ctx.arc(joy.bx, joy.by, JOY_R, 0, 7);
+    ctx.fillStyle = "#cfd8ef"; ctx.fill();
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.arc(joy.bx + joy.dx * JOY_R, joy.by + joy.dy * JOY_R, 26, 0, 7);
+    ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
 }
 
 function drawBean(x, y, color, dir, ghost, name, moving) {

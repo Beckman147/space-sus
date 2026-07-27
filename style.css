@@ -5,7 +5,10 @@ body {
   color: #e8ecf7;
   font-family: "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
+  overscroll-behavior: none;
 }
+button { touch-action: manipulation; }
+input { user-select: text; -webkit-user-select: text; }
 .hidden { display: none !important; }
 kbd {
   background: #232a45; border: 1px solid #3a4670; border-bottom-width: 3px;
@@ -16,6 +19,7 @@ kbd {
 .screen {
   height: 100%; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 18px; padding: 20px;
+  overflow-y: auto;
   background:
     radial-gradient(1px 1px at 20% 30%, #fff8, transparent 2px),
     radial-gradient(1px 1px at 70% 60%, #fff6, transparent 2px),
@@ -85,8 +89,12 @@ button:disabled { opacity: .35; cursor: default; }
 .lobby-actions { display: flex; flex-direction: column; gap: 10px; justify-content: center; width: 220px; }
 
 /* ---------- game ---------- */
-#gameWrap { position: fixed; inset: 0; }
-#cv { position: absolute; inset: 0; display: block; }
+#gameWrap {
+  position: fixed; inset: 0;
+  touch-action: none; user-select: none;
+  -webkit-user-select: none; -webkit-touch-callout: none;
+}
+#cv { position: absolute; inset: 0; display: block; touch-action: none; }
 #hud { position: absolute; inset: 0; pointer-events: none; }
 #taskPanel { position: absolute; top: 12px; left: 12px; width: 300px; }
 #taskBarOuter {
@@ -137,7 +145,7 @@ button:disabled { opacity: .35; cursor: default; }
 .codegrid button.hit { background: #21b558; border-color: #35d47a; }
 
 /* ---------- meeting ---------- */
-.meeting { background: #151b33; border: 2px solid #3a4670; border-radius: 16px; width: 680px; max-width: 96vw; max-height: 94vh; display: flex; flex-direction: column; padding: 14px; gap: 10px; }
+.meeting { background: #151b33; border: 2px solid #3a4670; border-radius: 16px; width: 680px; max-width: 96vw; max-height: 94vh; display: flex; flex-direction: column; padding: 14px; gap: 10px; overflow-y: auto; }
 .meeting-head { display: flex; justify-content: space-between; font-weight: 800; font-size: 18px; letter-spacing: 1px; }
 #meetingTimer { color: #ffd166; }
 .votecards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
@@ -157,6 +165,28 @@ button:disabled { opacity: .35; cursor: default; }
 #meetingResult { color: #ffd166; font-weight: 700; }
 .meetingchat { width: 100%; }
 .meetingchat .chatlog { min-height: 80px; max-height: 140px; }
+
+/* ---------- small screens (phones / small tablets) ---------- */
+@media (max-width: 820px), (max-height: 500px) {
+  .logo { font-size: 40px; letter-spacing: 6px; }
+  #taskPanel { width: 190px; }
+  #taskBarOuter { height: 20px; }
+  #taskBarLabel { font-size: 10px; }
+  #taskList { font-size: 11px; }
+  #taskList li { padding: 3px 6px; }
+  .act { width: 66px; height: 66px; font-size: 11px; border-width: 2px; }
+  .act small { font-size: 9px; }
+  #actionBtns { right: 10px; bottom: 10px; gap: 6px; }
+  #roleFlashText { font-size: 30px; letter-spacing: 3px; }
+  .votecards { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+  .vcard { padding: 5px; font-size: 12px; }
+  .meeting { padding: 10px; gap: 7px; }
+  .meeting-head { font-size: 14px; }
+  .meetingchat .chatlog { min-height: 50px; max-height: 80px; }
+  .endbox h1 { font-size: 34px; }
+  .modal { width: 340px; }
+  #taskArea { min-height: 180px; padding: 14px; }
+}
 
 /* ---------- end ---------- */
 .endbox { text-align: center; display: flex; flex-direction: column; gap: 16px; align-items: center; }

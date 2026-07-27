@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Sus — online social deduction</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ HOME SCREEN ============ -->
+<div id="home" class="screen">
+  <h1 class="logo">SPACE&nbsp;SUS</h1>
+  <p class="tagline">A fan-made social deduction game. Play online with friends — no accounts, no installs.</p>
+  <div class="panel">
+    <input id="nameInput" maxlength="12" placeholder="Your name" autocomplete="off">
+    <div class="row">
+      <button id="createBtn" class="big green">Create Room</button>
+    </div>
+    <div class="row joinrow">
+      <input id="codeInput" maxlength="5" placeholder="CODE" autocomplete="off">
+      <button id="joinBtn" class="big blue">Join</button>
+    </div>
+    <p id="homeMsg" class="msg"></p>
+  </div>
+  <div class="howto">
+    <b>How to play:</b> Crewmates finish tasks (walk to a glowing console, press <kbd>E</kbd>).
+    One player is secretly the Impostor and must eliminate the crew without getting caught.
+    Report bodies or hit the emergency button to call a meeting and vote someone out.
+    Move with <kbd>WASD</kbd> / arrows. Best with 4–10 players.
+  </div>
+</div>
+
+<!-- ============ LOBBY SCREEN ============ -->
+<div id="lobby" class="screen hidden">
+  <h2>Lobby</h2>
+  <div class="codebox">Room code: <span id="lobbyCode">-----</span></div>
+  <div id="lobbyPlayers" class="lobby-players"></div>
+  <div class="lobby-bottom">
+    <div class="chatbox">
+      <div id="lobbyChatLog" class="chatlog"></div>
+      <div class="chatinput">
+        <input id="lobbyChatInput" maxlength="120" placeholder="Chat…" autocomplete="off">
+        <button id="lobbyChatSend">Send</button>
+      </div>
+    </div>
+    <div class="lobby-actions">
+      <button id="startBtn" class="big green hidden">Start Game</button>
+      <p id="lobbyMsg" class="msg">Waiting for the host to start…</p>
+      <p class="hint">2 players minimum (4+ recommended). 7+ players = 2 impostors.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ GAME SCREEN ============ -->
+<div id="gameWrap" class="hidden">
+  <canvas id="cv"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="taskPanel">
+      <div id="taskBarOuter"><div id="taskBarInner"></div><span id="taskBarLabel">TOTAL TASKS</span></div>
+      <ul id="taskList"></ul>
+    </div>
+    <div id="actionBtns">
+      <button id="useBtn" class="act" disabled>USE<small>E</small></button>
+      <button id="reportBtn" class="act" disabled>REPORT<small>R</small></button>
+      <button id="killBtn" class="act red hidden" disabled>KILL<small>Q</small></button>
+      <button id="buttonBtn" class="act hidden" disabled>MEETING</button>
+    </div>
+  </div>
+
+  <!-- role reveal flash -->
+  <div id="roleFlash" class="overlay hidden"><div id="roleFlashText"></div></div>
+
+  <!-- task minigame modal -->
+  <div id="taskModal" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head"><span id="taskTitle"></span><button id="taskClose">✕</button></div>
+      <div id="taskArea"></div>
+    </div>
+  </div>
+
+  <!-- meeting overlay -->
+  <div id="meetingOverlay" class="overlay hidden">
+    <div class="meeting">
+      <div class="meeting-head">
+        <span id="meetingTitle">Emergency Meeting</span>
+        <span id="meetingTimer"></span>
+      </div>
+      <div id="voteCards" class="votecards"></div>
+      <div class="meeting-foot">
+        <button id="skipBtn">Skip Vote</button>
+        <span id="meetingResult"></span>
+      </div>
+      <div class="chatbox meetingchat">
+        <div id="meetChatLog" class="chatlog"></div>
+        <div class="chatinput">
+          <input id="meetChatInput" maxlength="120" placeholder="Discuss…" autocomplete="off">
+          <button id="meetChatSend">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- end overlay -->
+  <div id="endOverlay" class="overlay hidden">
+    <div class="endbox">
+      <h1 id="endTitle"></h1>
+      <p id="endSub"></p>
+      <button id="lobbyReturnBtn" class="big green hidden">Return to Lobby</button>
+      <p id="endWait" class="msg hidden">Waiting for host…</p>
+    </div>
+  </div>
+
+  <!-- disconnected overlay -->
+  <div id="dcOverlay" class="overlay hidden">
+    <div class="endbox"><h1>Disconnected</h1><p id="dcMsg"></p>
+      <button onclick="location.reload()" class="big blue">Back to Menu</button></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

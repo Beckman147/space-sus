@@ -1,0 +1,164 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: #0b0f1e;
+  color: #e8ecf7;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+}
+.hidden { display: none !important; }
+kbd {
+  background: #232a45; border: 1px solid #3a4670; border-bottom-width: 3px;
+  border-radius: 4px; padding: 0 5px; font-family: inherit;
+}
+
+/* ---------- screens ---------- */
+.screen {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 18px; padding: 20px;
+  background:
+    radial-gradient(1px 1px at 20% 30%, #fff8, transparent 2px),
+    radial-gradient(1px 1px at 70% 60%, #fff6, transparent 2px),
+    radial-gradient(2px 2px at 40% 80%, #fff5, transparent 3px),
+    radial-gradient(1px 1px at 85% 15%, #fff7, transparent 2px),
+    radial-gradient(1px 1px at 10% 70%, #fff5, transparent 2px),
+    #0b0f1e;
+}
+.logo {
+  font-size: 64px; letter-spacing: 12px; font-weight: 900;
+  color: #ff4757; text-shadow: 0 0 30px #ff475766, 4px 4px 0 #5c0e17;
+}
+.tagline { color: #9aa7cc; max-width: 480px; text-align: center; }
+.panel {
+  background: #151b33; border: 1px solid #2a3560; border-radius: 14px;
+  padding: 24px; display: flex; flex-direction: column; gap: 12px; width: 320px;
+}
+.panel input, .chatinput input {
+  background: #0d1226; color: #fff; border: 1px solid #2a3560;
+  border-radius: 8px; padding: 10px 12px; font-size: 16px; outline: none; width: 100%;
+}
+.panel input:focus { border-color: #4a6cf7; }
+#codeInput { text-transform: uppercase; letter-spacing: 4px; font-weight: 700; }
+.row { display: flex; gap: 8px; }
+.joinrow input { flex: 1; min-width: 0; }
+button {
+  cursor: pointer; border: none; border-radius: 8px;
+  font-family: inherit; font-weight: 700; color: #fff;
+}
+button:disabled { opacity: .35; cursor: default; }
+.big { padding: 12px 18px; font-size: 16px; flex: 1; }
+.green { background: #21b558; } .green:hover:not(:disabled) { background: #29d267; }
+.blue { background: #3a5bdc; } .blue:hover:not(:disabled) { background: #4a6cf7; }
+.msg { color: #ffb3b3; min-height: 20px; font-size: 14px; text-align: center; }
+.hint { color: #7c89b0; font-size: 12px; text-align: center; }
+.howto { max-width: 520px; color: #92a0c8; font-size: 14px; line-height: 1.6; text-align: center; }
+
+/* ---------- lobby ---------- */
+#lobby h2 { letter-spacing: 4px; }
+.codebox {
+  font-size: 20px; background: #151b33; border: 1px solid #2a3560;
+  padding: 10px 22px; border-radius: 10px;
+}
+#lobbyCode { font-weight: 900; letter-spacing: 6px; color: #ffd166; user-select: all; }
+.lobby-players {
+  display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; max-width: 720px;
+}
+.pcard {
+  width: 110px; padding: 12px 8px; text-align: center; border-radius: 12px;
+  background: #151b33; border: 1px solid #2a3560;
+}
+.pcard .dot { width: 42px; height: 48px; margin: 0 auto 8px; border-radius: 40% 40% 34% 34%; position: relative; }
+.pcard .dot::after {
+  content: ""; position: absolute; left: 55%; top: 10px; width: 20px; height: 12px;
+  background: #aee3ff; border-radius: 8px; border: 2px solid #0b0f1e55;
+}
+.pcard .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pcard .hosttag { font-size: 10px; color: #ffd166; }
+.lobby-bottom { display: flex; gap: 20px; align-items: stretch; flex-wrap: wrap; justify-content: center; }
+.chatbox { width: 340px; display: flex; flex-direction: column; background: #10152b; border: 1px solid #2a3560; border-radius: 10px; }
+.chatlog { flex: 1; min-height: 120px; max-height: 180px; overflow-y: auto; padding: 10px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.chatlog .sys { color: #7c89b0; font-style: italic; }
+.chatlog .dead { color: #9aa0b8; }
+.chatlog b { margin-right: 4px; }
+.chatinput { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #222c50; }
+.chatinput button { background: #3a5bdc; padding: 8px 14px; }
+.lobby-actions { display: flex; flex-direction: column; gap: 10px; justify-content: center; width: 220px; }
+
+/* ---------- game ---------- */
+#gameWrap { position: fixed; inset: 0; }
+#cv { position: absolute; inset: 0; display: block; }
+#hud { position: absolute; inset: 0; pointer-events: none; }
+#taskPanel { position: absolute; top: 12px; left: 12px; width: 300px; }
+#taskBarOuter {
+  position: relative; height: 26px; background: #10152bcc; border: 1px solid #2a3560;
+  border-radius: 8px; overflow: hidden; margin-bottom: 8px;
+}
+#taskBarInner { height: 100%; width: 0%; background: linear-gradient(90deg, #1f9e4e, #35d47a); transition: width .4s; }
+#taskBarLabel { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; letter-spacing: 2px; text-shadow: 0 1px 2px #000; }
+#taskList { list-style: none; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+#taskList li { background: #10152bb8; border-left: 3px solid #ffd166; padding: 5px 8px; border-radius: 4px; }
+#taskList li.done { border-left-color: #35d47a; color: #7fdba4; text-decoration: line-through; }
+#taskList li.imp { border-left-color: #ff4757; color: #ff9aa2; }
+#actionBtns { position: absolute; right: 16px; bottom: 16px; display: flex; gap: 10px; pointer-events: auto; }
+.act {
+  width: 84px; height: 84px; border-radius: 50%; background: #26304ecc; border: 2px solid #4a5680;
+  font-size: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+}
+.act small { color: #9aa7cc; font-size: 10px; }
+.act:not(:disabled) { background: #3a5bdccc; border-color: #7d97ff; box-shadow: 0 0 18px #4a6cf788; }
+.act.red:not(:disabled) { background: #d43a45cc; border-color: #ff8890; box-shadow: 0 0 18px #ff475788; }
+
+/* ---------- overlays ---------- */
+.overlay {
+  position: absolute; inset: 0; background: #060a16cc;
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+#roleFlash { background: #000000e6; transition: opacity .5s; }
+#roleFlashText { font-size: 46px; font-weight: 900; letter-spacing: 6px; text-align: center; line-height: 1.4; }
+#roleFlashText small { display: block; font-size: 16px; font-weight: 400; letter-spacing: 1px; color: #b9c3e0; }
+.crewclr { color: #6fe3ff; text-shadow: 0 0 24px #6fe3ff88; }
+.impclr { color: #ff4757; text-shadow: 0 0 24px #ff475788; }
+
+.modal { background: #151b33; border: 1px solid #3a4670; border-radius: 14px; width: 400px; max-width: 92vw; }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #2a3560; font-weight: 700; }
+#taskClose { background: none; font-size: 18px; color: #9aa7cc; }
+#taskArea { padding: 20px; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.holdbtn { width: 130px; height: 130px; border-radius: 50%; font-size: 16px; background: #3a5bdc; border: 4px solid #7d97ff; }
+.holdbtn:active { background: #21b558; }
+.progress { width: 100%; height: 14px; background: #0d1226; border-radius: 7px; overflow: hidden; }
+.progress div { height: 100%; width: 0%; background: #35d47a; }
+.wirerow { display: flex; justify-content: space-between; width: 100%; }
+.wirecol { display: flex; flex-direction: column; gap: 18px; }
+.wire { width: 44px; height: 26px; border-radius: 6px; border: 2px solid #ffffff33; }
+.wire.sel { outline: 3px solid #fff; }
+.wire.done { opacity: .3; }
+.codegrid { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.codegrid button { width: 56px; height: 56px; font-size: 22px; background: #26304e; border: 2px solid #4a5680; }
+.codegrid button.hit { background: #21b558; border-color: #35d47a; }
+
+/* ---------- meeting ---------- */
+.meeting { background: #151b33; border: 2px solid #3a4670; border-radius: 16px; width: 680px; max-width: 96vw; max-height: 94vh; display: flex; flex-direction: column; padding: 14px; gap: 10px; }
+.meeting-head { display: flex; justify-content: space-between; font-weight: 800; font-size: 18px; letter-spacing: 1px; }
+#meetingTimer { color: #ffd166; }
+.votecards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.vcard {
+  display: flex; align-items: center; gap: 8px; background: #10152b; border: 2px solid #2a3560;
+  border-radius: 10px; padding: 8px; cursor: pointer; position: relative;
+}
+.vcard:hover { border-color: #4a6cf7; }
+.vcard.deadcard { opacity: .4; cursor: default; }
+.vcard.myvote { border-color: #ffd166; }
+.vcard .dot { width: 26px; height: 30px; border-radius: 40% 40% 34% 34%; flex-shrink: 0; }
+.vcard .cnt { position: absolute; right: 8px; top: 8px; background: #ffd166; color: #201500; border-radius: 10px; padding: 0 8px; font-weight: 800; font-size: 13px; }
+.vcard .votedchip { position: absolute; right: 8px; bottom: 6px; font-size: 10px; color: #7fdba4; }
+.meeting-foot { display: flex; align-items: center; gap: 14px; }
+#skipBtn { background: #6b7280; padding: 9px 16px; }
+#skipBtn.myvote { outline: 2px solid #ffd166; }
+#meetingResult { color: #ffd166; font-weight: 700; }
+.meetingchat { width: 100%; }
+.meetingchat .chatlog { min-height: 80px; max-height: 140px; }
+
+/* ---------- end ---------- */
+.endbox { text-align: center; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+.endbox h1 { font-size: 52px; letter-spacing: 6px; }
+.endbox p { color: #b9c3e0; }

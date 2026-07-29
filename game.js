@@ -111,8 +111,8 @@ const VENT_RANGE = 90;
 const SABS = {
   lights:  { name: "Lights",           room: "Electrical", fx: { x: 830,  y: 1300 } },
   comms:   { name: "Comms",            room: "Navigation", fx: { x: 2400, y: 820  } },
-  reactor: { name: "Reactor Meltdown", room: "Reactor",    fx: { x: 380,  y: 1050 }, time: 45000 },
-  o2:      { name: "O2 Depletion",     room: "O2",         fx: { x: 1960, y: 820  }, time: 45000 },
+  reactor: { name: "Reactor Meltdown", room: "Reactor",    fx: { x: 380,  y: 1050 }, time: 25000 },
+  o2:      { name: "O2 Depletion",     room: "O2",         fx: { x: 1960, y: 820  }, time: 25000 },
 };
 const SAB_CD      = 25000;
 const VISION_DARK = 190;   // crew vision while the lights are sabotaged

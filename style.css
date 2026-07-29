@@ -166,6 +166,18 @@ button:disabled { opacity: .35; cursor: default; }
 .meetingchat { width: 100%; }
 .meetingchat .chatlog { min-height: 80px; max-height: 140px; }
 
+/* rotate nudge — portrait phones get a narrower view, landscape is fairer */
+#rotateHint {
+  position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%);
+  background: #0b0f1ee8; border: 1px solid #3a4670; border-radius: 10px;
+  padding: 10px 16px; font-size: 14px; font-weight: 700; text-align: center;
+  pointer-events: none; display: none; z-index: 5;
+}
+@media (orientation: portrait) and (max-width: 820px) {
+  #rotateHint { display: block; animation: hintFade 6s ease-out forwards; }
+}
+@keyframes hintFade { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
+
 /* ---------- small screens (phones / small tablets) ---------- */
 @media (max-width: 820px), (max-height: 500px) {
   .logo { font-size: 40px; letter-spacing: 6px; }

@@ -24,6 +24,10 @@ const SNAP_MS     = 66;       // ~15 Hz
 // Reference viewport area (world units²). Every screen is zoomed to show this
 // same area, so a 4K monitor and a phone reveal an equal slice of the map.
 const VIEW_AREA   = 1150 * 690;
+// Extreme aspect ratios get letterboxed back into this range, so an ultrawide
+// can't see way down a corridor and a tall phone isn't a narrow slit.
+const AR_MIN      = 0.55;   // tallest allowed (portrait)
+const AR_MAX      = 1.9;    // widest allowed (landscape)
 
 const COLORS = [
   ["Red",    "#c51111"], ["Blue",  "#1330c0"], ["Green", "#117f2d"],
@@ -817,15 +821,28 @@ function draw() {
   // Fairness: everyone sees the SAME amount of the ship regardless of screen
   // size. We zoom so the visible world area is constant — a big monitor just
   // renders it larger, a phone smaller, but nobody gets extra map to look at.
-  curZoom = clamp(Math.sqrt((W * H) / (VIEW_AREA * DPR * DPR)), 0.42, 5);
+  // Letterbox only the excess: shrink the drawing box until its aspect ratio is
+  // inside [AR_MIN, AR_MAX], then fit the constant world area into that box.
+  let boxW = W, boxH = H;
+  const ar = W / H;
+  if (ar > AR_MAX) boxW = H * AR_MAX;
+  else if (ar < AR_MIN) boxH = W / AR_MIN;
+  const ox = (W - boxW) / 2, oy = (H - boxH) / 2;
+
+  curZoom = clamp(Math.sqrt((boxW * boxH) / (VIEW_AREA * DPR * DPR)), 0.42, 5);
   const zoom = curZoom * DPR;
-  const viewW = W / zoom, viewH = H / zoom;
+  const viewW = boxW / zoom, viewH = boxH / zoom;
   const camX = camClamp(Client.me.x, viewW, -200, 2800);
   const camY = camClamp(Client.me.y, viewH, -200, 2000);
+
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = "#05070f";
+  ctx.fillStyle = "#02030a";           // letterbox bars
   ctx.fillRect(0, 0, W, H);
-  ctx.setTransform(zoom, 0, 0, zoom, -camX * zoom, -camY * zoom);
+  ctx.save();                          // clip so nothing spills into the bars
+  ctx.beginPath(); ctx.rect(ox, oy, boxW, boxH); ctx.clip();
+  ctx.fillStyle = "#05070f";
+  ctx.fillRect(ox, oy, boxW, boxH);
+  ctx.setTransform(zoom, 0, 0, zoom, ox - camX * zoom, oy - camY * zoom);
 
   // stars
   ctx.fillStyle = "#cfd8ef";
@@ -914,7 +931,7 @@ function draw() {
     visCtx.fillStyle = "rgba(4,7,16,0.93)";
     visCtx.fillRect(0, 0, W, H);
     // radius is a fixed WORLD distance, so sight range is identical on every device
-    const px = (Client.me.x - camX) * zoom, py = (Client.me.y - camY) * zoom;
+    const px = ox + (Client.me.x - camX) * zoom, py = oy + (Client.me.y - camY) * zoom;
     const vrs = vr * zoom;
     const g = visCtx.createRadialGradient(px, py, vrs * 0.35, px, py, vrs);
     g.addColorStop(0, "rgba(0,0,0,1)");
@@ -926,6 +943,7 @@ function draw() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(visCv, 0, 0);
   }
+  ctx.restore();                       // drop the letterbox clip
   // joystick lives in CSS-pixel screen space
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   if (joy.active) {

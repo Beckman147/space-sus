@@ -538,7 +538,7 @@ const Client = {
     $("endOverlay").classList.add("hidden");
     $("meetingOverlay").classList.add("hidden");
     $("gameWrap").classList.remove("hidden");
-    resizeCanvas();
+    applyViewport();
     buildTaskList();
     $("killBtn").classList.toggle("hidden", this.role !== "imp");
     $("buttonBtn").classList.remove("hidden");
@@ -628,18 +628,20 @@ const JOY_R = 60;
 const joy = { active: false, id: -1, bx: 0, by: 0, dx: 0, dy: 0 };
 function joyStart(e) {
   if (Client.screen !== "game") return;
+  const r = cv.getBoundingClientRect();
   for (const t of e.changedTouches) {
     if (joy.active) continue;
     joy.active = true; joy.id = t.identifier;
-    joy.bx = t.clientX; joy.by = t.clientY;
+    joy.bx = t.clientX - r.left; joy.by = t.clientY - r.top;
     joy.dx = 0; joy.dy = 0;
   }
   e.preventDefault();
 }
 function joyMove(e) {
+  const r = cv.getBoundingClientRect();
   for (const t of e.changedTouches) {
     if (t.identifier !== joy.id) continue;
-    let dx = t.clientX - joy.bx, dy = t.clientY - joy.by;
+    let dx = (t.clientX - r.left) - joy.bx, dy = (t.clientY - r.top) - joy.by;
     const l = Math.hypot(dx, dy);
     if (l > JOY_R) { dx = dx / l * JOY_R; dy = dy / l * JOY_R; }
     joy.dx = dx / JOY_R; joy.dy = dy / JOY_R;
@@ -738,22 +740,46 @@ const cv = $("cv"), ctx = cv.getContext("2d");
 let visCv = document.createElement("canvas"), visCtx = visCv.getContext("2d");
 let DPR = 1;
 let curZoom = 1;   // world→CSS-pixel scale of the current frame
+// Size the canvas from its OWN box — never from window.innerWidth. The two
+// disagree whenever the visual viewport differs from the layout viewport
+// (pinch/page zoom, mobile URL bars), which silently scaled the world and
+// shoved the player into a corner.
+function canvasCssSize() {
+  const r = cv.getBoundingClientRect();
+  return [Math.round(r.width), Math.round(r.height)];
+}
 function resizeCanvas() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.round(window.innerWidth * DPR), h = Math.round(window.innerHeight * DPR);
-  cv.width = visCv.width = w;
-  cv.height = visCv.height = h;
+  const [cssW, cssH] = canvasCssSize();
+  if (cssW < 2 || cssH < 2) return;          // hidden — keep what we have
+  cv.width = visCv.width = Math.round(cssW * DPR);
+  cv.height = visCv.height = Math.round(cssH * DPR);
 }
-window.addEventListener("resize", resizeCanvas);
-window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 250));
+// Pin the play area to the VISIBLE region, so a zoomed page or an overlapping
+// URL bar can't push the map or the buttons off screen.
+function applyViewport() {
+  const vv = window.visualViewport, gw = $("gameWrap");
+  gw.style.width = (vv ? vv.width : window.innerWidth) + "px";
+  gw.style.height = (vv ? vv.height : window.innerHeight) + "px";
+  gw.style.left = (vv ? vv.offsetLeft : 0) + "px";
+  gw.style.top = (vv ? vv.offsetTop : 0) + "px";
+  resizeCanvas();
+}
+window.addEventListener("resize", applyViewport);
+window.addEventListener("orientationchange", () => setTimeout(applyViewport, 250));
+if (window.visualViewport) {
+  visualViewport.addEventListener("resize", applyViewport);
+  visualViewport.addEventListener("scroll", applyViewport);
+}
 // iOS/Android don't always fire resize on rotation or URL-bar collapse, so
 // re-check the backing size each frame (cheap; only acts when it changed).
 function ensureCanvasSize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  if (cv.width !== Math.round(window.innerWidth * dpr) ||
-      cv.height !== Math.round(window.innerHeight * dpr)) resizeCanvas();
+  const [cssW, cssH] = canvasCssSize();
+  if (cssW < 2 || cssH < 2) return;
+  if (cv.width !== Math.round(cssW * dpr) || cv.height !== Math.round(cssH * dpr)) resizeCanvas();
 }
-resizeCanvas();
+applyViewport();
 cv.addEventListener("touchstart", joyStart, { passive: false });
 cv.addEventListener("touchmove", joyMove, { passive: false });
 cv.addEventListener("touchend", joyEnd, { passive: false });

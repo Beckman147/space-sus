@@ -27,7 +27,8 @@
     <b>How to play:</b> Crewmates finish tasks (walk to a glowing console, press <kbd>E</kbd>).
     One player is secretly the Impostor and must eliminate the crew without getting caught.
     Impostors can slip through <b>vents</b> and trigger <b>sabotages</b> — lights, comms, or a reactor
-    meltdown the crew must race to fix. Report bodies or hit the emergency button to call a meeting and vote someone out.
+    meltdown the crew must race to fix. Watch the <b>security cameras</b> in Security to catch them moving —
+    but every camera blinks red while you do. Report bodies or hit the emergency button to call a meeting and vote someone out.
     Move with <kbd>WASD</kbd> / arrows — or on phones and tablets, touch and drag anywhere on the map to move.
     Everyone sees the same amount of the ship, whatever their screen size. Best with 4–10 players.
   </div>
@@ -74,6 +75,15 @@
     </div>
     <div id="sabBanner" class="hidden"></div>
     <div id="ventPanel" class="hidden"></div>
+  </div>
+
+  <!-- security cameras -->
+  <div id="camModal" class="overlay hidden">
+    <div class="modal cammodal">
+      <div class="modal-head"><span>Security Cameras</span><button id="camClose">✕</button></div>
+      <div id="camGrid"></div>
+      <p class="camnote">Every camera on the ship blinks red while you watch.</p>
+    </div>
   </div>
 
   <!-- sabotage menu -->

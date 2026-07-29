@@ -117,6 +117,17 @@ const SABS = {
 const SAB_CD      = 25000;
 const VISION_DARK = 190;   // crew vision while the lights are sabotaged
 
+// Security cameras. Watching them lights every camera red, so the impostor
+// knows someone is on the monitors. Comms sabotage knocks the feeds out.
+const CAMS = [
+  { n: "CAFETERIA",    x:  990, y:  170, vx: 1270, vy: 360  },
+  { n: "STORAGE",      x: 1220, y: 1220, vx: 1390, vy: 1390 },
+  { n: "UPPER ENGINE", x:  200, y:  240, vx:  340, vy:  360 },
+  { n: "LOWER ENGINE", x:  200, y: 1340, vx:  340, vy: 1460 },
+];
+const CAM_CONSOLE = { x: 850, y: 900 };   // the monitor bank in Security
+const CAM_VIEW_W  = 660;                  // world units across one feed
+
 // ------------------ helpers ------------------
 const $ = id => document.getElementById(id);
 const now = () => Date.now();
@@ -236,7 +247,7 @@ const Host = {
       ci, color: COLORS[ci % COLORS.length][1],
       x: BUTTON.x, y: BUTTON.y + 80, dir: 1, mv: 0,
       alive: true, imp: false, tasks: [], done: new Set(),
-      usedBtn: false, lastKill: 0, vent: -1,
+      usedBtn: false, lastKill: 0, vent: -1, cams: false,
     };
     this.players.set(id, p);
     this.sendRoster();
@@ -280,6 +291,13 @@ const Host = {
         this.sendTo(p, { t: "ventOk", v: p.vent, x: p.x, y: p.y });
         break;
       }
+      case "cams": {
+        if (!m.on) { p.cams = false; break; }
+        if (this.phase !== "play" || !p.alive || p.vent >= 0) break;
+        if (dist(p, CAM_CONSOLE) > USE_RANGE + 60) break;
+        p.cams = true;
+        break;
+      }
       case "sab": {
         if (this.phase !== "play" || !p.imp || !p.alive) break;
         if (this.sab || now() < this.sabReadyAt) break;
@@ -312,7 +330,7 @@ const Host = {
         if (dist(p, t) > KILL_RANGE + 60) break;
         if (now() - p.lastKill < KILL_CD - 2000) break;
         p.lastKill = now();
-        t.alive = false;
+        t.alive = false; t.cams = false;
         this.bodies.push({ x: t.x, y: t.y, color: t.color, id: t.id });
         p.x = t.x; p.y = t.y;
         this.sendTo(p, { t: "tp", x: t.x, y: t.y });
@@ -376,7 +394,7 @@ const Host = {
       p.alive = true; p.imp = impIds.includes(p.id);
       p.done = new Set(); p.usedBtn = false; p.lastKill = now() - KILL_CD + 15000;
       p.tasks = p.imp ? [] : shuffle(stationIds).slice(0, TASKS_PER);
-      p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1;
+      p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1; p.cams = false;
     });
     this.bodies = []; this.meeting = null; this.phase = "play";
     this.sab = null; this.sabReadyAt = now() + 15000;
@@ -398,7 +416,7 @@ const Host = {
     const pos = {};
     ids.forEach((id, i) => {
       const p = this.players.get(id);
-      p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1;
+      p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1; p.cams = false;
       pos[id] = spots[i];
     });
     this.phase = "meeting";
@@ -528,6 +546,7 @@ const Host = {
       mt: mt ? { e: mt.ends, v: Object.keys(mt.votes), r: mt.reveal ? 1 : 0 } : 0,
       sb: this.sab ? { t: this.sab.type, e: this.sab.ends } : 0,
       sr: this.sabReadyAt,
+      cw: [...this.players.values()].some(p => p.cams && p.alive) ? 1 : 0,
     };
     for (const q of this.players.values()) {
       // players inside a vent are invisible to the living crew
@@ -550,6 +569,7 @@ const Client = {
   bodies: [], meeting: null, killReadyAt: 0, usedBtn: false,
   modalOpen: false, lastPosSend: 0, votedFor: null, hostId: null,
   ventId: -1, sab: null, sabReadyAt: 0, ventedIds: [],
+  camsOpen: false, camsWatched: false,
 
   enterLobby(code) {
     this.screen = "lobby";
@@ -598,7 +618,7 @@ const Client = {
         this.meeting = { ends: m.ends, voted: [], reveal: null };
         this.votedFor = null;
         if (m.pos[Net.myId]) { this.me.x = m.pos[Net.myId][0]; this.me.y = m.pos[Net.myId][1]; }
-        closeTaskModal();
+        closeTaskModal(); closeCams(); closeVentPanel();
         openMeeting(m);
         break;
       case "ejected":
@@ -609,7 +629,7 @@ const Client = {
         this.phase = "end";
         this.meeting = null;
         $("meetingOverlay").classList.add("hidden");
-        closeTaskModal();
+        closeTaskModal(); closeCams(); closeVentPanel(); closeSabMenu();
         showEnd(m);
         break;
       case "toLobby":
@@ -630,7 +650,8 @@ const Client = {
     this.bodies = []; this.meeting = null;
     this.others = {};
     this.ventId = -1; this.sab = null; this.sabReadyAt = now() + 15000;
-    closeVentPanel(); closeSabMenu(); showSabBanner();
+    this.camsWatched = false;
+    closeVentPanel(); closeSabMenu(); closeCams(); showSabBanner();
     $("sabBtn").classList.toggle("hidden", m.role !== "imp");
     $("ventBtn").classList.toggle("hidden", m.role !== "imp");
     this.screen = "game"; this.phase = "play";
@@ -668,6 +689,7 @@ const Client = {
     this.bodies = m.bd.map(b => ({ x: b[0], y: b[1], color: b[2] }));
     if (m.mt && this.meeting) { this.meeting.voted = m.mt.v; this.meeting.ends = m.mt.e; }
     this.sabReadyAt = m.sr || 0;
+    this.camsWatched = !!m.cw;
     const sabWas = this.sab && this.sab.type;
     this.sab = m.sb ? { type: m.sb.t, ends: m.sb.e } : null;
     if ((this.sab && this.sab.type) !== sabWas) showSabBanner();
@@ -679,7 +701,7 @@ const Client = {
       if (id === Net.myId) {
         const wasAlive = this.me.alive;
         this.me.alive = !!alive;
-        if (wasAlive && !alive) { closeTaskModal(); closeVentPanel(); closeSabMenu(); }
+        if (wasAlive && !alive) { closeTaskModal(); closeVentPanel(); closeSabMenu(); closeCams(); }
         if (!inVent && this.ventId >= 0) { this.ventId = -1; closeVentPanel(); }
         continue;
       }
@@ -698,8 +720,8 @@ const Client = {
     this.role = null; this.tasks = []; this.doneSet = new Set();
     this.bodies = []; this.meeting = null; this.others = {};
     this.me.alive = true;
-    this.ventId = -1; this.sab = null;
-    closeVentPanel(); closeSabMenu(); showSabBanner();
+    this.ventId = -1; this.sab = null; this.camsWatched = false;
+    closeVentPanel(); closeSabMenu(); closeCams(); showSabBanner();
     $("gameWrap").classList.add("hidden");
     $("endOverlay").classList.add("hidden");
     $("meetingOverlay").classList.add("hidden");
@@ -729,7 +751,7 @@ window.addEventListener("keydown", e => {
   if (k === "r") tryReport();
   if (k === "f") tryVent();
   if (k === "x") toggleSabMenu();
-  if (k === "escape") { closeTaskModal(); closeSabMenu(); }
+  if (k === "escape") { closeTaskModal(); closeSabMenu(); closeCams(); }
 });
 window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 
@@ -831,6 +853,7 @@ function sabFixHere() {
 function tryUse() {
   if (Client.phase !== "play" || Client.modalOpen || Client.ventId >= 0) return;
   if (sabFixHere()) { Net.toHost({ t: "fixSab" }); return; }
+  if (nearCamConsole()) { openCams(); return; }
   if (Client.role === "imp") { tryButton(); return; }
   const s = nearestStation();
   if (s) openTaskModal(s);
@@ -844,6 +867,80 @@ function tryVent() {
   if (v) Net.toHost({ t: "vent", a: "enter", v: v.id });
 }
 function ventJump(id) { Net.toHost({ t: "vent", a: "move", v: id }); }
+
+// ---- security cameras ----
+function nearCamConsole() {
+  return Client.me.alive && Client.ventId < 0 && dist(Client.me, CAM_CONSOLE) < USE_RANGE;
+}
+function openCams() {
+  if (Client.camsOpen) return;
+  Client.camsOpen = true;
+  Client.modalOpen = true;
+  Net.toHost({ t: "cams", on: true });
+  buildCamGrid();
+  $("camModal").classList.remove("hidden");
+}
+function closeCams() {
+  if (!Client.camsOpen) return;
+  Client.camsOpen = false;
+  Client.modalOpen = false;
+  Net.toHost({ t: "cams", on: false });
+  $("camModal").classList.add("hidden");
+}
+function buildCamGrid() {
+  const grid = $("camGrid");
+  grid.innerHTML = "";
+  for (const c of CAMS) {
+    const cell = document.createElement("div");
+    cell.className = "camcell";
+    const cvs = document.createElement("canvas");
+    cvs.className = "feed";
+    const tag = document.createElement("span");
+    tag.className = "camtag";
+    tag.textContent = c.n;
+    cell.appendChild(cvs);
+    cell.appendChild(tag);
+    grid.appendChild(cell);
+    c.el = cvs;
+  }
+}
+function drawCamFeeds() {
+  const dead = Client.sab && Client.sab.type === "comms";
+  for (const c of CAMS) {
+    const cvs = c.el;
+    if (!cvs) continue;
+    const r = cvs.getBoundingClientRect();
+    if (r.width < 2) continue;
+    const w = Math.round(r.width * DPR), h = Math.round(r.height * DPR);
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    const fc = cvs.getContext("2d");
+    fc.setTransform(1, 0, 0, 1, 0, 0);
+    if (dead) { drawStatic(fc, w, h); continue; }
+    fc.fillStyle = "#05070f";
+    fc.fillRect(0, 0, w, h);
+    const zoom = w / CAM_VIEW_W;
+    const viewW = w / zoom, viewH = h / zoom;
+    const camX = c.vx - viewW / 2, camY = c.vy - viewH / 2;
+    fc.setTransform(zoom, 0, 0, zoom, -camX * zoom, -camY * zoom);
+    withCtx(fc, () => renderScene(camX, camY, viewW, viewH));
+    // scanlines
+    fc.setTransform(1, 0, 0, 1, 0, 0);
+    fc.fillStyle = "rgba(120,220,255,0.05)";
+    for (let y = 0; y < h; y += 4) fc.fillRect(0, y, w, 2);
+  }
+}
+function drawStatic(fc, w, h) {
+  fc.fillStyle = "#0a0d18";
+  fc.fillRect(0, 0, w, h);
+  fc.fillStyle = "rgba(200,220,255,0.16)";
+  for (let i = 0; i < 260; i++) {
+    fc.fillRect(Math.random() * w, Math.random() * h, 2 + Math.random() * 3, 2);
+  }
+  fc.fillStyle = "#ff8890";
+  fc.font = "700 13px 'Segoe UI', sans-serif";
+  fc.textAlign = "center";
+  fc.fillText("SIGNAL LOST", w / 2, h / 2);
+}
 function tryButton() {
   if (Client.phase !== "play" || !Client.me.alive || Client.usedBtn) return;
   if (dist(Client.me, BUTTON) > BTN_RANGE) return;
@@ -869,6 +966,7 @@ $("buttonBtn").onclick = tryButton;
 $("ventBtn").onclick = tryVent;
 $("sabBtn").onclick = toggleSabMenu;
 $("sabClose").onclick = closeSabMenu;
+$("camClose").onclick = closeCams;
 
 // ---- sabotage menu (impostor) ----
 function toggleSabMenu() {
@@ -958,7 +1056,15 @@ function updateSabBanner() {
 // ============================================================
 // GAME LOOP + RENDERING
 // ============================================================
-const cv = $("cv"), ctx = cv.getContext("2d");
+const cv = $("cv");
+// `ctx` is mutable so the scene renderer can be pointed at a camera-feed
+// canvas instead of the main one (see withCtx).
+let ctx = cv.getContext("2d");
+function withCtx(c, fn) {
+  const prev = ctx;
+  ctx = c;
+  try { fn(); } finally { ctx = prev; }
+}
 let visCv = document.createElement("canvas"), visCtx = visCv.getContext("2d");
 let DPR = 1;
 let curZoom = 1;   // world→CSS-pixel scale of the current frame
@@ -1060,6 +1166,7 @@ function gameTick() {
 
   ensureCanvasSize();
   draw();
+  if (Client.camsOpen) drawCamFeeds();
   updateHUD();
 }
 requestAnimationFrame(frame);
@@ -1091,7 +1198,13 @@ function draw() {
   ctx.fillStyle = "#05070f";
   ctx.fillRect(ox, oy, boxW, boxH);
   ctx.setTransform(zoom, 0, 0, zoom, ox - camX * zoom, oy - camY * zoom);
+  renderScene(camX, camY, viewW, viewH);
+  drawFogAndOverlays(W, H, ox, oy, zoom, camX, camY);
+}
 
+// Draws the ship and everyone on it, in world coordinates. Assumes the
+// caller has already set the world transform on the active context.
+function renderScene(camX, camY, viewW, viewH) {
   // stars
   ctx.fillStyle = "#cfd8ef";
   for (const [sx, sy, sr] of STARS) {
@@ -1157,6 +1270,10 @@ function draw() {
   const impView = Client.role === "imp";
   for (const v of VENTS) drawVent(v, impView, Client.ventId === v.id);
 
+  // security cameras + the monitor bank in Security
+  for (const c of CAMS) drawCamera(c);
+  drawCamConsole();
+
   // active sabotage repair console
   if (Client.sab) {
     const fx = SABS[Client.sab.type].fx;
@@ -1195,7 +1312,9 @@ function draw() {
   if (Client.ventId >= 0) ctx.globalAlpha = 0.55;
   drawBean(Client.me.x, Client.me.y, myMeta.color, Client.me.dir, iAmDead, myMeta.name, Client.me.mv);
   ctx.globalAlpha = 1;
+}
 
+function drawFogAndOverlays(W, H, ox, oy, zoom, camX, camY) {
   // vision fog (alive players during play only)
   if (Client.phase === "play" && Client.me.alive) {
     const dark = Client.sab && Client.sab.type === "lights" && Client.role !== "imp";
@@ -1273,6 +1392,47 @@ function drawBean(x, y, color, dir, ghost, name, moving) {
   ctx.fillText(name, x, y - 40);
   ctx.restore();
 }
+// A camera on a wall bracket. Its lamp turns red while anyone is on the
+// monitors — that blink is the crew's tell and the impostor's warning.
+function drawCamera(c) {
+  const live = Client.camsWatched && !(Client.sab && Client.sab.type === "comms");
+  ctx.save();
+  ctx.translate(c.x, c.y);
+  ctx.fillStyle = "#4a5470";
+  ctx.fillRect(-4, -2, 8, 16);                 // bracket
+  ctx.fillStyle = "#5c6685";
+  ctx.strokeStyle = "#20263c";
+  ctx.lineWidth = 2;
+  rr(-16, -18, 32, 18, 4); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#20263c";
+  rr(10, -14, 8, 10, 2); ctx.fill();            // lens housing
+  ctx.beginPath();
+  ctx.arc(0, -9, 4, 0, 7);
+  if (live) {
+    ctx.fillStyle = "#ff4757";
+    ctx.fill();
+    ctx.globalAlpha = 0.3 + 0.35 * Math.sin(now() / 160);
+    ctx.beginPath(); ctx.arc(0, -9, 16, 0, 7);
+    ctx.fillStyle = "#ff4757"; ctx.fill();
+  } else {
+    ctx.fillStyle = "#39415f";
+    ctx.fill();
+  }
+  ctx.restore();
+}
+function drawCamConsole() {
+  ctx.save();
+  ctx.translate(CAM_CONSOLE.x, CAM_CONSOLE.y);
+  ctx.fillStyle = "#39415f";
+  ctx.strokeStyle = "#20263c";
+  ctx.lineWidth = 3;
+  rr(-30, -22, 60, 40, 5); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = Client.camsWatched ? "#6fe3ff" : "#20263c";
+  for (let i = 0; i < 2; i++)
+    for (let j = 0; j < 2; j++) ctx.fillRect(-24 + i * 26, -16 + j * 18, 22, 14);
+  ctx.restore();
+}
+
 function drawVent(v, highlight, occupied) {
   ctx.save();
   ctx.translate(v.x, v.y);
@@ -1344,9 +1504,10 @@ function updateHUD() {
   const vented = Client.ventId >= 0;
 
   const fix = sabFixHere();
+  const cam = nearCamConsole();
   const st = nearestStation();
-  $("useBtn").disabled = !(play && !Client.modalOpen && !vented && (fix || (Client.role !== "imp" && st)));
-  $("useBtn").innerHTML = fix ? "FIX<small>E</small>" : "USE<small>E</small>";
+  $("useBtn").disabled = !(play && !Client.modalOpen && !vented && (fix || cam || (Client.role !== "imp" && st)));
+  $("useBtn").innerHTML = fix ? "FIX<small>E</small>" : cam ? "CAMS<small>E</small>" : "USE<small>E</small>";
 
   const bd = nearestBody();
   $("reportBtn").disabled = !(play && alive && !vented && bd);

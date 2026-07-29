@@ -90,6 +90,33 @@ const STATIONS = [
 ];
 STATIONS.forEach(s => s.t = s.id % 3);
 
+// Vent networks — impostors only. You can hop between vents that share a network.
+const VENTS = [
+  { x: 1050, y: 1470, links: [1, 2] },   // 0 Electrical
+  { x:  660, y:  600, links: [0, 2] },   // 1 MedBay
+  { x:  660, y:  980, links: [0, 1] },   // 2 Security
+  { x: 1050, y:  520, links: [4, 5] },   // 3 Cafeteria
+  { x: 2200, y:  200, links: [3, 5] },   // 4 Weapons
+  { x: 2500, y: 1050, links: [3, 4] },   // 5 Navigation
+  { x:  250, y:  420, links: [7, 8] },   // 6 Upper Engine
+  { x:  200, y: 1000, links: [6, 8] },   // 7 Reactor
+  { x:  250, y: 1560, links: [6, 7] },   // 8 Lower Engine
+  { x: 2000, y: 1500, links: [10] },     // 9 Shields
+  { x: 1250, y: 1250, links: [9] },      // 10 Storage
+];
+VENTS.forEach((v, i) => v.id = i);
+const VENT_RANGE = 90;
+
+// Sabotages. Critical ones run a countdown that ends the game if it expires.
+const SABS = {
+  lights:  { name: "Lights",           room: "Electrical", fx: { x: 830,  y: 1300 } },
+  comms:   { name: "Comms",            room: "Navigation", fx: { x: 2400, y: 820  } },
+  reactor: { name: "Reactor Meltdown", room: "Reactor",    fx: { x: 380,  y: 1050 }, time: 45000 },
+  o2:      { name: "O2 Depletion",     room: "O2",         fx: { x: 1960, y: 820  }, time: 45000 },
+};
+const SAB_CD      = 25000;
+const VISION_DARK = 190;   // crew vision while the lights are sabotaged
+
 // ------------------ helpers ------------------
 const $ = id => document.getElementById(id);
 const now = () => Date.now();
@@ -190,6 +217,7 @@ const Host = {
   active: false, code: "", phase: "lobby",
   players: new Map(),          // id -> player
   bodies: [], meeting: null, snapTimer: null, revealTimer: null,
+  sab: null, sabReadyAt: 0,
 
   init(code, name) {
     this.active = true;
@@ -208,7 +236,7 @@ const Host = {
       ci, color: COLORS[ci % COLORS.length][1],
       x: BUTTON.x, y: BUTTON.y + 80, dir: 1, mv: 0,
       alive: true, imp: false, tasks: [], done: new Set(),
-      usedBtn: false, lastKill: 0,
+      usedBtn: false, lastKill: 0, vent: -1,
     };
     this.players.set(id, p);
     this.sendRoster();
@@ -231,9 +259,45 @@ const Host = {
     if (!p || !m) return;
     switch (m.t) {
       case "pos":
+        if (p.vent >= 0) break;                    // vented players don't move
         p.x = clamp(+m.x || 0, 0, 2600); p.y = clamp(+m.y || 0, 0, 1800);
         p.dir = m.dir >= 0 ? 1 : -1; p.mv = m.mv ? 1 : 0;
         break;
+      case "vent": {
+        if (this.phase !== "play" || !p.imp || !p.alive) break;
+        const v = VENTS[m.v];
+        if (m.a === "enter") {
+          if (p.vent >= 0 || !v || dist(p, v) > VENT_RANGE + 60) break;
+          p.vent = v.id; p.x = v.x; p.y = v.y; p.mv = 0;
+        } else if (m.a === "move") {
+          if (p.vent < 0 || !v || !VENTS[p.vent].links.includes(v.id)) break;
+          p.vent = v.id; p.x = v.x; p.y = v.y;
+        } else if (m.a === "exit") {
+          if (p.vent < 0) break;
+          const cur = VENTS[p.vent];
+          p.vent = -1; p.x = cur.x; p.y = cur.y;
+        }
+        this.sendTo(p, { t: "ventOk", v: p.vent, x: p.x, y: p.y });
+        break;
+      }
+      case "sab": {
+        if (this.phase !== "play" || !p.imp || !p.alive) break;
+        if (this.sab || now() < this.sabReadyAt) break;
+        const def = SABS[m.s];
+        if (!def) break;
+        this.sabReadyAt = now() + SAB_CD;
+        this.sab = { type: m.s, ends: def.time ? now() + def.time : 0 };
+        this.broadcast({ t: "sabOn", s: m.s, ends: this.sab.ends });
+        break;
+      }
+      case "fixSab": {
+        if (this.phase !== "play" || !p.alive || !this.sab || p.vent >= 0) break;
+        const def = SABS[this.sab.type];
+        if (dist(p, def.fx) > USE_RANGE + 60) break;
+        this.sab = null;
+        this.broadcast({ t: "sabOff" });
+        break;
+      }
       case "task": {
         if (this.phase !== "play" && this.phase !== "meeting") break;
         if (p.imp || !p.tasks.includes(m.sid) || p.done.has(m.sid)) break;
@@ -242,7 +306,7 @@ const Host = {
         break;
       }
       case "kill": {
-        if (this.phase !== "play" || !p.imp || !p.alive) break;
+        if (this.phase !== "play" || !p.imp || !p.alive || p.vent >= 0) break;
         const t = this.players.get(m.tid);
         if (!t || !t.alive || t.imp) break;
         if (dist(p, t) > KILL_RANGE + 60) break;
@@ -256,13 +320,14 @@ const Host = {
         break;
       }
       case "report": {
-        if (this.phase !== "play" || !p.alive) break;
+        if (this.phase !== "play" || !p.alive || p.vent >= 0) break;
         const b = this.bodies.find(b => dist(p, b) < REPORT_RANGE + 60);
         if (b) this.startMeeting(p, this.players.get(b.id));
         break;
       }
       case "button":
-        if (this.phase !== "play" || !p.alive || p.usedBtn) break;
+        if (this.phase !== "play" || !p.alive || p.usedBtn || p.vent >= 0) break;
+        if (this.sab && SABS[this.sab.type].time) break;   // no meetings mid-crisis
         if (dist(p, BUTTON) > BTN_RANGE + 60) break;
         p.usedBtn = true;
         this.startMeeting(p, null);
@@ -311,9 +376,10 @@ const Host = {
       p.alive = true; p.imp = impIds.includes(p.id);
       p.done = new Set(); p.usedBtn = false; p.lastKill = now() - KILL_CD + 15000;
       p.tasks = p.imp ? [] : shuffle(stationIds).slice(0, TASKS_PER);
-      p.x = spots[i][0]; p.y = spots[i][1];
+      p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1;
     });
     this.bodies = []; this.meeting = null; this.phase = "play";
+    this.sab = null; this.sabReadyAt = now() + 15000;
     for (const p of ps) {
       this.sendTo(p, {
         t: "start", role: p.imp ? "imp" : "crew",
@@ -326,12 +392,13 @@ const Host = {
 
   startMeeting(caller, victim) {
     this.bodies = [];
+    this.sab = null;                       // a meeting clears any sabotage
     const ids = [...this.players.keys()];
     const spots = meetingSpots(ids.length);
     const pos = {};
     ids.forEach((id, i) => {
       const p = this.players.get(id);
-      p.x = spots[i][0]; p.y = spots[i][1];
+      p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1;
       pos[id] = spots[i];
     });
     this.phase = "meeting";
@@ -372,6 +439,7 @@ const Host = {
       this.meeting = null;
       if (!this.checkWin()) {
         this.phase = "play";
+        this.sabReadyAt = now() + 10000;
         for (const p of this.players.values()) p.lastKill = now();
       }
     }, REVEAL_TIME);
@@ -397,10 +465,10 @@ const Host = {
 
   backToLobby() {
     this.phase = "lobby";
-    this.bodies = []; this.meeting = null;
+    this.bodies = []; this.meeting = null; this.sab = null;
     for (const p of this.players.values()) {
       p.alive = true; p.imp = false; p.done = new Set(); p.tasks = [];
-      p.x = BUTTON.x; p.y = BUTTON.y + 80;
+      p.x = BUTTON.x; p.y = BUTTON.y + 80; p.vent = -1;
     }
     this.broadcast({ t: "toLobby" });
     this.sendRoster();
@@ -443,15 +511,30 @@ const Host = {
   tick() {
     // meeting timeout
     if (this.phase === "meeting" && this.meeting && !this.meeting.reveal && now() > this.meeting.ends) this.tally();
-    // snapshot
+    // critical sabotage ran out — crew loses
+    if (this.phase === "play" && this.sab && this.sab.ends && now() > this.sab.ends) {
+      this.sab = null;
+      this.gameOver("imp");
+      return;
+    }
     const mt = this.meeting;
-    this.broadcast({
+    const rows = [...this.players.values()].map(p =>
+      [p.id, Math.round(p.x), Math.round(p.y), p.dir, p.mv, p.alive ? 1 : 0, p.vent >= 0 ? 1 : 0]);
+    const anyVented = rows.some(r => r[6]);
+    const base = {
       t: "s", ph: this.phase,
-      pl: [...this.players.values()].map(p => [p.id, Math.round(p.x), Math.round(p.y), p.dir, p.mv, p.alive ? 1 : 0]),
       bd: this.bodies.map(b => [Math.round(b.x), Math.round(b.y), b.color]),
       tb: this.tasksTotal() ? this.tasksDone() / this.tasksTotal() : 0,
       mt: mt ? { e: mt.ends, v: Object.keys(mt.votes), r: mt.reveal ? 1 : 0 } : 0,
-    });
+      sb: this.sab ? { t: this.sab.type, e: this.sab.ends } : 0,
+      sr: this.sabReadyAt,
+    };
+    for (const q of this.players.values()) {
+      // players inside a vent are invisible to the living crew
+      const seesVented = q.imp || !q.alive;
+      const pl = (!anyVented || seesVented) ? rows : rows.filter(r => !r[6] || r[0] === q.id);
+      this.sendTo(q, Object.assign({ pl }, base));
+    }
   },
 };
 
@@ -466,6 +549,7 @@ const Client = {
   role: null, imps: [], tasks: [], doneSet: new Set(), taskbar: 0,
   bodies: [], meeting: null, killReadyAt: 0, usedBtn: false,
   modalOpen: false, lastPosSend: 0, votedFor: null, hostId: null,
+  ventId: -1, sab: null, sabReadyAt: 0, ventedIds: [],
 
   enterLobby(code) {
     this.screen = "lobby";
@@ -497,6 +581,18 @@ const Client = {
         break;
       case "tp":
         this.me.x = m.x; this.me.y = m.y;
+        break;
+      case "ventOk":
+        this.ventId = m.v; this.me.x = m.x; this.me.y = m.y;
+        renderVentPanel();
+        break;
+      case "sabOn":
+        this.sab = { type: m.s, ends: m.ends };
+        showSabBanner();
+        break;
+      case "sabOff":
+        this.sab = null;
+        showSabBanner();
         break;
       case "meeting":
         this.meeting = { ends: m.ends, voted: [], reveal: null };
@@ -533,6 +629,10 @@ const Client = {
     this.killReadyAt = now() + 15000;
     this.bodies = []; this.meeting = null;
     this.others = {};
+    this.ventId = -1; this.sab = null; this.sabReadyAt = now() + 15000;
+    closeVentPanel(); closeSabMenu(); showSabBanner();
+    $("sabBtn").classList.toggle("hidden", m.role !== "imp");
+    $("ventBtn").classList.toggle("hidden", m.role !== "imp");
     this.screen = "game"; this.phase = "play";
     $("lobby").classList.add("hidden");
     $("endOverlay").classList.add("hidden");
@@ -567,21 +667,28 @@ const Client = {
     this.taskbar = m.tb;
     this.bodies = m.bd.map(b => ({ x: b[0], y: b[1], color: b[2] }));
     if (m.mt && this.meeting) { this.meeting.voted = m.mt.v; this.meeting.ends = m.mt.e; }
-    const seen = new Set();
+    this.sabReadyAt = m.sr || 0;
+    const sabWas = this.sab && this.sab.type;
+    this.sab = m.sb ? { type: m.sb.t, ends: m.sb.e } : null;
+    if ((this.sab && this.sab.type) !== sabWas) showSabBanner();
+    const seen = new Set(), vented = [];
     for (const row of m.pl) {
-      const [id, x, y, dir, mv, alive] = row;
+      const [id, x, y, dir, mv, alive, inVent] = row;
       seen.add(id);
+      if (inVent) vented.push(id);
       if (id === Net.myId) {
         const wasAlive = this.me.alive;
         this.me.alive = !!alive;
-        if (wasAlive && !alive) { closeTaskModal(); }  // I just died
+        if (wasAlive && !alive) { closeTaskModal(); closeVentPanel(); closeSabMenu(); }
+        if (!inVent && this.ventId >= 0) { this.ventId = -1; closeVentPanel(); }
         continue;
       }
       let o = this.others[id];
       if (!o) o = this.others[id] = { x, y, tx: x, ty: y, dir, mv, alive: !!alive };
-      o.tx = x; o.ty = y; o.dir = dir; o.mv = mv; o.alive = !!alive;
+      o.tx = x; o.ty = y; o.dir = dir; o.mv = mv; o.alive = !!alive; o.vent = !!inVent;
       if (this.phase === "meeting") { o.x = x; o.y = y; }
     }
+    this.ventedIds = vented;
     for (const id of Object.keys(this.others)) if (!seen.has(id)) delete this.others[id];
     if (this.screen === "game" && this.phase === "meeting") updateMeetingUI();
   },
@@ -591,6 +698,8 @@ const Client = {
     this.role = null; this.tasks = []; this.doneSet = new Set();
     this.bodies = []; this.meeting = null; this.others = {};
     this.me.alive = true;
+    this.ventId = -1; this.sab = null;
+    closeVentPanel(); closeSabMenu(); showSabBanner();
     $("gameWrap").classList.add("hidden");
     $("endOverlay").classList.add("hidden");
     $("meetingOverlay").classList.add("hidden");
@@ -618,7 +727,9 @@ window.addEventListener("keydown", e => {
   if (k === "e" || k === " ") { tryUse(); e.preventDefault(); }
   if (k === "q") tryKill();
   if (k === "r") tryReport();
-  if (k === "escape") closeTaskModal();
+  if (k === "f") tryVent();
+  if (k === "x") toggleSabMenu();
+  if (k === "escape") { closeTaskModal(); closeSabMenu(); }
 });
 window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 
@@ -701,15 +812,38 @@ function nearestBody() {
   return best;
 }
 
-function tryUse() {
-  if (Client.phase !== "play" || Client.modalOpen || Client.role === "imp") {
-    if (Client.role === "imp") tryButton();
-    return;
+function nearestVent() {
+  if (Client.role !== "imp") return null;
+  let best = null, bd = VENT_RANGE;
+  for (const v of VENTS) {
+    const d = dist(Client.me, v);
+    if (d < bd) { bd = d; best = v; }
   }
+  return best;
+}
+// the console that repairs the active sabotage, if we're standing at it
+function sabFixHere() {
+  if (!Client.sab || !Client.me.alive || Client.ventId >= 0) return null;
+  const fx = SABS[Client.sab.type].fx;
+  return dist(Client.me, fx) < USE_RANGE ? fx : null;
+}
+
+function tryUse() {
+  if (Client.phase !== "play" || Client.modalOpen || Client.ventId >= 0) return;
+  if (sabFixHere()) { Net.toHost({ t: "fixSab" }); return; }
+  if (Client.role === "imp") { tryButton(); return; }
   const s = nearestStation();
   if (s) openTaskModal(s);
   else tryButton();
 }
+
+function tryVent() {
+  if (Client.role !== "imp" || Client.phase !== "play" || !Client.me.alive) return;
+  if (Client.ventId >= 0) { Net.toHost({ t: "vent", a: "exit", v: Client.ventId }); return; }
+  const v = nearestVent();
+  if (v) Net.toHost({ t: "vent", a: "enter", v: v.id });
+}
+function ventJump(id) { Net.toHost({ t: "vent", a: "move", v: id }); }
 function tryButton() {
   if (Client.phase !== "play" || !Client.me.alive || Client.usedBtn) return;
   if (dist(Client.me, BUTTON) > BTN_RANGE) return;
@@ -732,6 +866,94 @@ $("useBtn").onclick = tryUse;
 $("killBtn").onclick = tryKill;
 $("reportBtn").onclick = tryReport;
 $("buttonBtn").onclick = tryButton;
+$("ventBtn").onclick = tryVent;
+$("sabBtn").onclick = toggleSabMenu;
+$("sabClose").onclick = closeSabMenu;
+
+// ---- sabotage menu (impostor) ----
+function toggleSabMenu() {
+  if (Client.role !== "imp" || Client.phase !== "play" || !Client.me.alive) return;
+  if (!$("sabModal").classList.contains("hidden")) { closeSabMenu(); return; }
+  renderSabMenu();
+  Client.modalOpen = true;
+  $("sabModal").classList.remove("hidden");
+}
+function closeSabMenu() {
+  if ($("sabModal").classList.contains("hidden")) return;
+  Client.modalOpen = false;
+  $("sabModal").classList.add("hidden");
+}
+function renderSabMenu() {
+  const box = $("sabList");
+  box.innerHTML = "";
+  const cd = Math.max(0, Client.sabReadyAt - now());
+  const blocked = Client.sab ? "A sabotage is already active." : cd > 0 ? "Recharging: " + Math.ceil(cd / 1000) + "s" : "";
+  if (blocked) {
+    const p = document.createElement("p");
+    p.className = "sabnote";
+    p.textContent = blocked;
+    box.appendChild(p);
+  }
+  for (const [key, def] of Object.entries(SABS)) {
+    const b = document.createElement("button");
+    b.className = "sabopt" + (def.time ? " crit" : "");
+    b.innerHTML = "<b>" + def.name + "</b><small>" + (def.time ? "Critical — crew must fix it in "
+      + (def.time / 1000) + "s" : "Fixed at " + def.room) + "</small>";
+    b.disabled = !!blocked;
+    b.onclick = () => { Net.toHost({ t: "sab", s: key }); closeSabMenu(); };
+    box.appendChild(b);
+  }
+}
+
+// ---- vent panel ----
+function renderVentPanel() {
+  const panel = $("ventPanel");
+  if (Client.ventId < 0) { closeVentPanel(); return; }
+  const cur = VENTS[Client.ventId];
+  panel.innerHTML = "";
+  const label = document.createElement("div");
+  label.className = "ventlabel";
+  label.textContent = "In vent — " + roomAt(cur);
+  panel.appendChild(label);
+  for (const id of cur.links) {
+    const b = document.createElement("button");
+    b.textContent = "→ " + roomAt(VENTS[id]);
+    b.onclick = () => ventJump(id);
+    panel.appendChild(b);
+  }
+  const ex = document.createElement("button");
+  ex.className = "ventexit";
+  ex.textContent = "Climb out (F)";
+  ex.onclick = tryVent;
+  panel.appendChild(ex);
+  panel.classList.remove("hidden");
+}
+function closeVentPanel() { $("ventPanel").classList.add("hidden"); }
+function roomAt(pt) {
+  for (const r of ROOMS) {
+    if (pt.x >= r.x && pt.x <= r.x + r.w && pt.y >= r.y && pt.y <= r.y + r.h) return r.n;
+  }
+  return "Vent";
+}
+
+// ---- sabotage banner ----
+function showSabBanner() {
+  const el = $("sabBanner");
+  if (!Client.sab) { el.classList.add("hidden"); $("taskPanel").classList.remove("commsdown"); return; }
+  const def = SABS[Client.sab.type];
+  el.classList.toggle("crit", !!def.time);
+  el.classList.remove("hidden");
+  $("taskPanel").classList.toggle("commsdown", Client.sab.type === "comms");
+  updateSabBanner();
+}
+function updateSabBanner() {
+  if (!Client.sab) return;
+  const def = SABS[Client.sab.type];
+  const left = def.time ? Math.max(0, Math.ceil((Client.sab.ends - now()) / 1000)) : 0;
+  $("sabBanner").innerHTML = "<b>" + def.name.toUpperCase() + "</b>" +
+    (def.time ? " <span class='sabclock'>" + left + "s</span>" : "") +
+    "<small>Fix it in " + def.room + "</small>";
+}
 
 // ============================================================
 // GAME LOOP + RENDERING
@@ -807,7 +1029,7 @@ function gameTick() {
   if (Client.screen !== "game") return;
 
   // ---- movement ----
-  const canMove = Client.phase === "play" && !Client.modalOpen;
+  const canMove = Client.phase === "play" && !Client.modalOpen && Client.ventId < 0;
   if (canMove) {
     const [dx, dy] = moveDir();
     const me = Client.me;
@@ -931,6 +1153,27 @@ function draw() {
     }
   }
 
+  // vents — impostors get them highlighted
+  const impView = Client.role === "imp";
+  for (const v of VENTS) drawVent(v, impView, Client.ventId === v.id);
+
+  // active sabotage repair console
+  if (Client.sab) {
+    const fx = SABS[Client.sab.type].fx;
+    const pulse = 0.4 + 0.3 * Math.sin(now() / 200);
+    ctx.globalAlpha = pulse;
+    ctx.beginPath(); ctx.arc(fx.x, fx.y, 52, 0, 7);
+    ctx.fillStyle = "#ff4757"; ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#ffd166"; ctx.strokeStyle = "#a83a00"; ctx.lineWidth = 3;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(fx.x - 24, fx.y - 18, 48, 36, 6); else ctx.rect(fx.x - 24, fx.y - 18, 48, 36);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#a83a00";
+    ctx.font = "700 22px 'Segoe UI', sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("!", fx.x, fx.y + 8);
+  }
+
   // bodies
   for (const b of Client.bodies) drawBody(b);
 
@@ -944,14 +1187,19 @@ function draw() {
   rows.sort((a, b) => a.o.y - b.o.y);
   for (const { id, o } of rows) {
     const meta = Client.meta[id] || { color: "#888", name: "?" };
+    if (o.vent) ctx.globalAlpha = 0.5;    // fellow impostor hiding in a vent
     drawBean(o.x, o.y, meta.color, o.dir, !o.alive, meta.name, o.mv);
+    ctx.globalAlpha = 1;
   }
   const myMeta = Client.meta[Net.myId] || { color: "#fff", name: "me" };
+  if (Client.ventId >= 0) ctx.globalAlpha = 0.55;
   drawBean(Client.me.x, Client.me.y, myMeta.color, Client.me.dir, iAmDead, myMeta.name, Client.me.mv);
+  ctx.globalAlpha = 1;
 
   // vision fog (alive players during play only)
   if (Client.phase === "play" && Client.me.alive) {
-    const vr = Client.role === "imp" ? VISION_IMP : VISION_CREW;
+    const dark = Client.sab && Client.sab.type === "lights" && Client.role !== "imp";
+    const vr = Client.role === "imp" ? VISION_IMP : (dark ? VISION_DARK : VISION_CREW);
     visCtx.setTransform(1, 0, 0, 1, 0, 0);
     visCtx.clearRect(0, 0, W, H);
     visCtx.fillStyle = "rgba(4,7,16,0.93)";
@@ -1025,6 +1273,23 @@ function drawBean(x, y, color, dir, ghost, name, moving) {
   ctx.fillText(name, x, y - 40);
   ctx.restore();
 }
+function drawVent(v, highlight, occupied) {
+  ctx.save();
+  ctx.translate(v.x, v.y);
+  if (highlight) {
+    ctx.globalAlpha = 0.3 + 0.2 * Math.sin(now() / 300);
+    ctx.beginPath(); ctx.arc(0, 0, 40, 0, 7);
+    ctx.fillStyle = occupied ? "#ffd166" : "#ff4757"; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = "#39415f";
+  ctx.strokeStyle = "#1d2338";
+  ctx.lineWidth = 3;
+  rr(-26, -20, 52, 40, 6); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#20263c";
+  for (let i = 0; i < 4; i++) ctx.fillRect(-20, -14 + i * 9, 40, 5);
+  ctx.restore();
+}
 function drawBody(b) {
   ctx.save();
   ctx.translate(b.x, b.y);
@@ -1076,12 +1341,24 @@ function updateHUD() {
   $("taskBarInner").style.width = Math.round(Client.taskbar * 100) + "%";
   const play = Client.phase === "play";
   const alive = Client.me.alive;
+  const vented = Client.ventId >= 0;
 
+  const fix = sabFixHere();
   const st = nearestStation();
-  $("useBtn").disabled = !(play && !Client.modalOpen && Client.role !== "imp" && st);
+  $("useBtn").disabled = !(play && !Client.modalOpen && !vented && (fix || (Client.role !== "imp" && st)));
+  $("useBtn").innerHTML = fix ? "FIX<small>E</small>" : "USE<small>E</small>";
 
   const bd = nearestBody();
-  $("reportBtn").disabled = !(play && alive && bd);
+  $("reportBtn").disabled = !(play && alive && !vented && bd);
+
+  if (Client.role === "imp") {
+    $("ventBtn").disabled = !(play && alive && (vented || nearestVent()));
+    $("ventBtn").innerHTML = vented ? "EXIT<small>F</small>" : "VENT<small>F</small>";
+    const cd = Math.max(0, Client.sabReadyAt - now());
+    $("sabBtn").disabled = !(play && alive && !Client.sab && !cd);
+    $("sabBtn").innerHTML = cd > 0 ? "SABO<small>" + Math.ceil(cd / 1000) + "s</small>" : "SABO<small>X</small>";
+  }
+  if (Client.sab && SABS[Client.sab.type].time) updateSabBanner();
 
   if (Client.role === "imp") {
     const cdLeft = Math.max(0, Client.killReadyAt - now());
@@ -1092,7 +1369,8 @@ function updateHUD() {
       : "KILL<small>Q</small>";
   }
   const nearBtn = dist(Client.me, BUTTON) < BTN_RANGE;
-  $("buttonBtn").disabled = !(play && alive && !Client.usedBtn && nearBtn);
+  const crisis = Client.sab && SABS[Client.sab.type].time;
+  $("buttonBtn").disabled = !(play && alive && !Client.usedBtn && nearBtn && !vented && !crisis);
 }
 
 // ============================================================

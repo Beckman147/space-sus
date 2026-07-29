@@ -173,6 +173,47 @@ button:disabled { opacity: .35; cursor: default; }
 .meetingchat { width: 100%; }
 .meetingchat .chatlog { min-height: 80px; max-height: 140px; }
 
+/* ---------- sabotage + vents ---------- */
+#sabBanner {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: #2a1420e8; border: 2px solid #ff4757; border-radius: 10px;
+  padding: 8px 18px; text-align: center; pointer-events: none; z-index: 4;
+  box-shadow: 0 0 24px #ff475755; max-width: 90vw;
+}
+#sabBanner b { letter-spacing: 2px; color: #ff8890; }
+#sabBanner small { display: block; color: #d7c4c8; font-weight: 400; }
+#sabBanner .sabclock { color: #ffd166; font-weight: 900; margin-left: 8px; }
+#sabBanner.crit { animation: sabPulse 1s infinite; }
+@keyframes sabPulse { 0%,100% { box-shadow: 0 0 24px #ff475755; } 50% { box-shadow: 0 0 34px #ff4757cc; } }
+#taskPanel.commsdown #taskList, #taskPanel.commsdown #taskBarInner { visibility: hidden; }
+#taskPanel.commsdown #taskBarOuter::after {
+  content: "COMMS DISABLED"; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #ff8890;
+}
+
+#sabList { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.sabnote { color: #ffd166; font-size: 13px; text-align: center; }
+.sabopt {
+  background: #26304e; border: 2px solid #4a5680; border-radius: 10px;
+  padding: 10px 14px; text-align: left; font-size: 15px;
+}
+.sabopt small { display: block; font-weight: 400; font-size: 12px; color: #9aa7cc; margin-top: 2px; }
+.sabopt:hover:not(:disabled) { border-color: #7d97ff; }
+.sabopt.crit { border-color: #a13540; }
+.sabopt.crit:hover:not(:disabled) { border-color: #ff4757; }
+
+#ventPanel {
+  position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+  background: #10152be8; border: 2px solid #ffd166; border-radius: 12px;
+  padding: 10px; pointer-events: auto; z-index: 4; min-width: 190px;
+}
+#ventPanel .ventlabel { font-size: 12px; color: #ffd166; text-align: center; letter-spacing: 1px; }
+#ventPanel button { background: #3a5bdc; padding: 10px 14px; font-size: 14px; }
+#ventPanel button:hover { background: #4a6cf7; }
+#ventPanel .ventexit { background: #6b7280; }
+
 /* rotate nudge — portrait phones get a narrower view, landscape is fairer */
 #rotateHint {
   position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%);
@@ -193,7 +234,10 @@ button:disabled { opacity: .35; cursor: default; }
   #taskBarLabel { font-size: 10px; }
   #taskList { font-size: 11px; }
   #taskList li { padding: 3px 6px; }
-  .act { width: 66px; height: 66px; font-size: 11px; border-width: 2px; }
+  .act { width: 58px; height: 58px; font-size: 10px; border-width: 2px; }
+  #sabBanner { padding: 6px 12px; font-size: 13px; top: 8px; }
+  #ventPanel { min-width: 150px; padding: 7px; bottom: 84px; }
+  #ventPanel button { padding: 8px 10px; font-size: 13px; }
   .act small { font-size: 9px; }
   #actionBtns { right: 10px; bottom: 10px; gap: 6px; }
   #roleFlashText { font-size: 30px; letter-spacing: 3px; }

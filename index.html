@@ -26,7 +26,8 @@
   <div class="howto">
     <b>How to play:</b> Crewmates finish tasks (walk to a glowing console, press <kbd>E</kbd>).
     One player is secretly the Impostor and must eliminate the crew without getting caught.
-    Report bodies or hit the emergency button to call a meeting and vote someone out.
+    Impostors can slip through <b>vents</b> and trigger <b>sabotages</b> — lights, comms, or a reactor
+    meltdown the crew must race to fix. Report bodies or hit the emergency button to call a meeting and vote someone out.
     Move with <kbd>WASD</kbd> / arrows — or on phones and tablets, touch and drag anywhere on the map to move.
     Everyone sees the same amount of the ship, whatever their screen size. Best with 4–10 players.
   </div>
@@ -67,7 +68,19 @@
       <button id="useBtn" class="act" disabled>USE<small>E</small></button>
       <button id="reportBtn" class="act" disabled>REPORT<small>R</small></button>
       <button id="killBtn" class="act red hidden" disabled>KILL<small>Q</small></button>
+      <button id="ventBtn" class="act hidden" disabled>VENT<small>F</small></button>
+      <button id="sabBtn" class="act red hidden" disabled>SABO<small>X</small></button>
       <button id="buttonBtn" class="act hidden" disabled>MEETING</button>
+    </div>
+    <div id="sabBanner" class="hidden"></div>
+    <div id="ventPanel" class="hidden"></div>
+  </div>
+
+  <!-- sabotage menu -->
+  <div id="sabModal" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head"><span>Sabotage</span><button id="sabClose">✕</button></div>
+      <div id="sabList"></div>
     </div>
   </div>
 

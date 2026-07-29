@@ -21,6 +21,9 @@ const TASKS_PER   = 5;
 const VISION_CREW = 520;
 const VISION_IMP  = 850;
 const SNAP_MS     = 66;       // ~15 Hz
+// Reference viewport area (world units²). Every screen is zoomed to show this
+// same area, so a 4K monitor and a phone reveal an equal slice of the map.
+const VIEW_AREA   = 1150 * 690;
 
 const COLORS = [
   ["Red",    "#c51111"], ["Blue",  "#1330c0"], ["Green", "#117f2d"],
@@ -111,6 +114,12 @@ function inWalk(x, y) {
 function canStand(x, y) {
   const m = 16;
   return inWalk(x - m, y) && inWalk(x + m, y) && inWalk(x, y - m) && inWalk(x, y + m);
+}
+// Keep the camera inside the map; if the view is wider than the map, center it.
+function camClamp(center, viewSize, min, max) {
+  const span = max - min;
+  if (viewSize >= span) return min + (span - viewSize) / 2;
+  return clamp(center - viewSize / 2, min, max - viewSize);
 }
 function meetingSpots(n) {
   const out = [];
@@ -723,11 +732,23 @@ $("buttonBtn").onclick = tryButton;
 // ============================================================
 const cv = $("cv"), ctx = cv.getContext("2d");
 let visCv = document.createElement("canvas"), visCtx = visCv.getContext("2d");
+let DPR = 1;
+let curZoom = 1;   // world→CSS-pixel scale of the current frame
 function resizeCanvas() {
-  cv.width = visCv.width = window.innerWidth;
-  cv.height = visCv.height = window.innerHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(window.innerWidth * DPR), h = Math.round(window.innerHeight * DPR);
+  cv.width = visCv.width = w;
+  cv.height = visCv.height = h;
 }
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("orientationchange", () => setTimeout(resizeCanvas, 250));
+// iOS/Android don't always fire resize on rotation or URL-bar collapse, so
+// re-check the backing size each frame (cheap; only acts when it changed).
+function ensureCanvasSize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(window.innerWidth * dpr) ||
+      cv.height !== Math.round(window.innerHeight * dpr)) resizeCanvas();
+}
 resizeCanvas();
 cv.addEventListener("touchstart", joyStart, { passive: false });
 cv.addEventListener("touchmove", joyMove, { passive: false });
@@ -785,6 +806,7 @@ function gameTick() {
     o.y += (o.ty - o.y) * k;
   }
 
+  ensureCanvasSize();
   draw();
   updateHUD();
 }
@@ -792,17 +814,23 @@ requestAnimationFrame(frame);
 
 function draw() {
   const W = cv.width, H = cv.height;
-  const camX = clamp(Client.me.x - W / 2, -200, 2800 - W);
-  const camY = clamp(Client.me.y - H / 2, -200, 2000 - H);
+  // Fairness: everyone sees the SAME amount of the ship regardless of screen
+  // size. We zoom so the visible world area is constant — a big monitor just
+  // renders it larger, a phone smaller, but nobody gets extra map to look at.
+  curZoom = clamp(Math.sqrt((W * H) / (VIEW_AREA * DPR * DPR)), 0.42, 5);
+  const zoom = curZoom * DPR;
+  const viewW = W / zoom, viewH = H / zoom;
+  const camX = camClamp(Client.me.x, viewW, -200, 2800);
+  const camY = camClamp(Client.me.y, viewH, -200, 2000);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = "#05070f";
   ctx.fillRect(0, 0, W, H);
-  ctx.translate(-camX, -camY);
+  ctx.setTransform(zoom, 0, 0, zoom, -camX * zoom, -camY * zoom);
 
   // stars
   ctx.fillStyle = "#cfd8ef";
   for (const [sx, sy, sr] of STARS) {
-    if (sx < camX - 10 || sx > camX + W + 10 || sy < camY - 10 || sy > camY + H + 10) continue;
+    if (sx < camX - 10 || sx > camX + viewW + 10 || sy < camY - 10 || sy > camY + viewH + 10) continue;
     ctx.globalAlpha = 0.5 + sr * 0.3;
     ctx.fillRect(sx, sy, sr, sr);
   }
@@ -885,20 +913,21 @@ function draw() {
     visCtx.clearRect(0, 0, W, H);
     visCtx.fillStyle = "rgba(4,7,16,0.93)";
     visCtx.fillRect(0, 0, W, H);
-    const px = Client.me.x - camX, py = Client.me.y - camY;
-    const g = visCtx.createRadialGradient(px, py, vr * 0.35, px, py, vr);
+    // radius is a fixed WORLD distance, so sight range is identical on every device
+    const px = (Client.me.x - camX) * zoom, py = (Client.me.y - camY) * zoom;
+    const vrs = vr * zoom;
+    const g = visCtx.createRadialGradient(px, py, vrs * 0.35, px, py, vrs);
     g.addColorStop(0, "rgba(0,0,0,1)");
     g.addColorStop(1, "rgba(0,0,0,0)");
     visCtx.globalCompositeOperation = "destination-out";
     visCtx.fillStyle = g;
-    visCtx.beginPath(); visCtx.arc(px, py, vr, 0, 7); visCtx.fill();
+    visCtx.beginPath(); visCtx.arc(px, py, vrs, 0, 7); visCtx.fill();
     visCtx.globalCompositeOperation = "source-over";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(visCv, 0, 0);
   }
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-  // virtual joystick (screen space)
+  // joystick lives in CSS-pixel screen space
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   if (joy.active) {
     ctx.globalAlpha = 0.28;
     ctx.beginPath(); ctx.arc(joy.bx, joy.by, JOY_R, 0, 7);
@@ -941,10 +970,10 @@ function drawBean(x, y, color, dir, ghost, name, moving) {
   ctx.fillStyle = "rgba(255,255,255,0.55)";
   rr(6, -20, 12, 5, 3); ctx.fill();
   ctx.restore();
-  // name
+  // name — sized so it reads the same on a phone as on a monitor
   ctx.save();
   ctx.globalAlpha = ghost ? 0.5 : 1;
-  ctx.font = "700 14px 'Segoe UI', sans-serif";
+  ctx.font = "700 " + clamp(13 / curZoom, 11, 30).toFixed(1) + "px 'Segoe UI', sans-serif";
   ctx.textAlign = "center";
   ctx.fillStyle = "#0b0f1e";
   ctx.fillText(name, x + 1, y - 40 + 1);

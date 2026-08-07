@@ -121,7 +121,9 @@ const VISION_DARK = 190;   // crew vision while the lights are sabotaged
 // knows someone is on the monitors. Comms sabotage knocks the feeds out.
 const CAMS = [
   { n: "CAFETERIA",    x:  990, y:  170, vx: 1270, vy: 360  },
+  { n: "MEDBAY",       x:  650, y:  400, vx:  750, vy:  500 },
   { n: "STORAGE",      x: 1220, y: 1220, vx: 1390, vy: 1390 },
+  { n: "ELECTRICAL",   x: 1070, y: 1270, vx:  930, vy: 1380 },
   { n: "UPPER ENGINE", x:  200, y:  240, vx:  340, vy:  360 },
   { n: "LOWER ENGINE", x:  200, y: 1340, vx:  340, vy: 1460 },
 ];

@@ -130,6 +130,21 @@ const CAMS = [
 const CAM_CONSOLE = { x: 850, y: 900 };   // the monitor bank in Security
 const CAM_VIEW_W  = 660;                  // world units across one feed
 
+// Special roles layered on top of crewmate / impostor.
+const SPECIALS = {
+  engineer:  { side: "crew", name: "Engineer",       blurb: "You can use the vents. 25s cooldown, 12s inside." },
+  scientist: { side: "crew", name: "Scientist",      blurb: "Check vitals from anywhere. 20s cooldown." },
+  angel:     { side: "crew", name: "Guardian Angel", blurb: "When you die, shield a living crewmate from one kill." },
+  shifter:   { side: "imp",  name: "Shapeshifter",   blurb: "Disguise yourself as another player for 20s." },
+};
+const ENG_VENT_CD  = 25000;
+const ENG_VENT_MAX = 12000;
+const SCI_CD       = 20000;
+const GA_CD        = 35000;
+const SHIELD_MS    = 10000;
+const SHIFT_MS     = 20000;
+const SHIFT_CD     = 30000;
+
 // ------------------ helpers ------------------
 const $ = id => document.getElementById(id);
 const now = () => Date.now();
@@ -250,6 +265,8 @@ const Host = {
       x: BUTTON.x, y: BUTTON.y + 80, dir: 1, mv: 0,
       alive: true, imp: false, tasks: [], done: new Set(),
       usedBtn: false, lastKill: 0, vent: -1, cams: false,
+      sp: "", ventReadyAt: 0, ventSince: 0, abilityReadyAt: 0,
+      shieldUntil: 0, shiftInto: null, shiftUntil: 0,
     };
     this.players.set(id, p);
     this.sendRoster();
@@ -277,11 +294,15 @@ const Host = {
         p.dir = m.dir >= 0 ? 1 : -1; p.mv = m.mv ? 1 : 0;
         break;
       case "vent": {
-        if (this.phase !== "play" || !p.imp || !p.alive) break;
+        if (this.phase !== "play" || !p.alive) break;
+        const eng = !p.imp && p.sp === "engineer";
+        if (!p.imp && !eng) break;                  // only impostors and engineers vent
         const v = VENTS[m.v];
         if (m.a === "enter") {
           if (p.vent >= 0 || !v || dist(p, v) > VENT_RANGE + 60) break;
+          if (eng && now() < p.ventReadyAt) break;  // engineer vent cooldown
           p.vent = v.id; p.x = v.x; p.y = v.y; p.mv = 0;
+          p.ventSince = now();
         } else if (m.a === "move") {
           if (p.vent < 0 || !v || !VENTS[p.vent].links.includes(v.id)) break;
           p.vent = v.id; p.x = v.x; p.y = v.y;
@@ -289,8 +310,48 @@ const Host = {
           if (p.vent < 0) break;
           const cur = VENTS[p.vent];
           p.vent = -1; p.x = cur.x; p.y = cur.y;
+          if (eng) p.ventReadyAt = now() + ENG_VENT_CD;
         }
-        this.sendTo(p, { t: "ventOk", v: p.vent, x: p.x, y: p.y });
+        this.sendTo(p, { t: "ventOk", v: p.vent, x: p.x, y: p.y, cd: p.ventReadyAt });
+        break;
+      }
+      case "vitals": {
+        if (this.phase !== "play" || p.sp !== "scientist" || !p.alive) break;
+        if (now() < p.abilityReadyAt) break;
+        p.abilityReadyAt = now() + SCI_CD;
+        this.sendTo(p, {
+          t: "vitals", cd: p.abilityReadyAt,
+          list: [...this.players.values()].map(q => ({ name: q.name, color: q.color, alive: q.alive })),
+        });
+        break;
+      }
+      case "shield": {
+        if (this.phase !== "play" || p.sp !== "angel" || p.alive) break;   // ghost ability
+        if (now() < p.abilityReadyAt) break;
+        const t = this.players.get(m.tid);
+        if (!t || !t.alive) break;
+        p.abilityReadyAt = now() + GA_CD;
+        t.shieldUntil = now() + SHIELD_MS;
+        this.sendTo(p, { t: "shieldOk", cd: p.abilityReadyAt, name: t.name });
+        this.sendTo(t, { t: "shielded", until: t.shieldUntil });
+        break;
+      }
+      case "shift": {
+        if (this.phase !== "play" || !p.imp || !p.alive || p.sp !== "shifter") break;
+        if (p.vent >= 0) break;
+        if (m.tid === null) {                       // revert early
+          p.shiftInto = null; p.shiftUntil = 0;
+          p.abilityReadyAt = now() + SHIFT_CD;
+          this.sendTo(p, { t: "shiftOk", into: null, until: 0, cd: p.abilityReadyAt });
+          break;
+        }
+        if (now() < p.abilityReadyAt || p.shiftUntil > now()) break;
+        const t = this.players.get(m.tid);
+        if (!t || t.id === p.id || !t.alive) break;
+        p.shiftInto = t.id;
+        p.shiftUntil = now() + SHIFT_MS;
+        p.abilityReadyAt = p.shiftUntil + SHIFT_CD;
+        this.sendTo(p, { t: "shiftOk", into: t.id, until: p.shiftUntil, cd: p.abilityReadyAt });
         break;
       }
       case "cams": {
@@ -328,10 +389,15 @@ const Host = {
       case "kill": {
         if (this.phase !== "play" || !p.imp || !p.alive || p.vent >= 0) break;
         const t = this.players.get(m.tid);
-        if (!t || !t.alive || t.imp) break;
+        if (!t || !t.alive || t.imp || t.vent >= 0) break;
         if (dist(p, t) > KILL_RANGE + 60) break;
         if (now() - p.lastKill < KILL_CD - 2000) break;
         p.lastKill = now();
+        if (t.shieldUntil > now()) {               // Guardian Angel saved them
+          this.sendTo(p, { t: "blocked" });
+          this.sendTo(t, { t: "saved" });
+          break;
+        }
         t.alive = false; t.cams = false;
         this.bodies.push({ x: t.x, y: t.y, color: t.color, id: t.id });
         p.x = t.x; p.y = t.y;
@@ -397,12 +463,23 @@ const Host = {
       p.done = new Set(); p.usedBtn = false; p.lastKill = now() - KILL_CD + 15000;
       p.tasks = p.imp ? [] : shuffle(stationIds).slice(0, TASKS_PER);
       p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1; p.cams = false;
+      p.sp = ""; p.ventReadyAt = 0; p.ventSince = 0;
+      p.abilityReadyAt = now() + 12000;
+      p.shieldUntil = 0; p.shiftInto = null; p.shiftUntil = 0;
     });
+    // hand out the special roles
+    const impPool = shuffle(ps.filter(p => p.imp));
+    if (impPool.length) impPool[0].sp = "shifter";
+    const crewPool = shuffle(ps.filter(p => !p.imp));
+    if (crewPool.length >= 1) crewPool[0].sp = "engineer";
+    if (crewPool.length >= 2) crewPool[1].sp = "scientist";
+    if (crewPool.length >= 3) crewPool[2].sp = "angel";
+
     this.bodies = []; this.meeting = null; this.phase = "play";
     this.sab = null; this.sabReadyAt = now() + 15000;
     for (const p of ps) {
       this.sendTo(p, {
-        t: "start", role: p.imp ? "imp" : "crew",
+        t: "start", role: p.imp ? "imp" : "crew", sp: p.sp,
         imps: p.imp ? impIds : [],
         tasks: p.tasks, total: this.tasksTotal(),
         x: p.x, y: p.y,
@@ -419,6 +496,7 @@ const Host = {
     ids.forEach((id, i) => {
       const p = this.players.get(id);
       p.x = spots[i][0]; p.y = spots[i][1]; p.vent = -1; p.cams = false;
+      p.shiftInto = null; p.shiftUntil = 0; p.shieldUntil = 0;
       pos[id] = spots[i];
     });
     this.phase = "meeting";
@@ -488,7 +566,8 @@ const Host = {
     this.bodies = []; this.meeting = null; this.sab = null;
     for (const p of this.players.values()) {
       p.alive = true; p.imp = false; p.done = new Set(); p.tasks = [];
-      p.x = BUTTON.x; p.y = BUTTON.y + 80; p.vent = -1;
+      p.x = BUTTON.x; p.y = BUTTON.y + 80; p.vent = -1; p.cams = false;
+      p.sp = ""; p.shiftInto = null; p.shiftUntil = 0; p.shieldUntil = 0;
     }
     this.broadcast({ t: "toLobby" });
     this.sendRoster();
@@ -538,9 +617,18 @@ const Host = {
       return;
     }
     const mt = this.meeting;
-    const rows = [...this.players.values()].map(p =>
-      [p.id, Math.round(p.x), Math.round(p.y), p.dir, p.mv, p.alive ? 1 : 0, p.vent >= 0 ? 1 : 0]);
-    const anyVented = rows.some(r => r[6]);
+    const T = now();
+    // expire shapeshifts
+    for (const p of this.players.values()) {
+      if (p.shiftUntil && T > p.shiftUntil) { p.shiftInto = null; p.shiftUntil = 0; }
+      // engineers get pushed out of a vent after their time is up
+      if (p.vent >= 0 && !p.imp && p.sp === "engineer" && T - p.ventSince > ENG_VENT_MAX) {
+        const cur = VENTS[p.vent];
+        p.vent = -1; p.x = cur.x; p.y = cur.y;
+        p.ventReadyAt = T + ENG_VENT_CD;
+        this.sendTo(p, { t: "ventOk", v: -1, x: p.x, y: p.y, cd: p.ventReadyAt });
+      }
+    }
     const base = {
       t: "s", ph: this.phase,
       bd: this.bodies.map(b => [Math.round(b.x), Math.round(b.y), b.color]),
@@ -550,10 +638,22 @@ const Host = {
       sr: this.sabReadyAt,
       cw: [...this.players.values()].some(p => p.cams && p.alive) ? 1 : 0,
     };
+    const hideDead = this.phase === "play";   // meetings reveal everyone anyway
     for (const q of this.players.values()) {
-      // players inside a vent are invisible to the living crew
       const seesVented = q.imp || !q.alive;
-      const pl = (!anyVented || seesVented) ? rows : rows.filter(r => !r[6] || r[0] === q.id);
+      const pl = [];
+      for (const p of this.players.values()) {
+        const isMe = p.id === q.id;
+        if (!isMe) {
+          if (p.vent >= 0 && !seesVented) continue;      // hidden in a vent
+          if (hideDead && q.alive && !p.alive) continue; // the living can't see ghosts
+        }
+        // a shield is only visible to its holder and to ghosts
+        const sh = p.shieldUntil > T && (isMe || !q.alive) ? 1 : 0;
+        const ap = p.shiftUntil > T && p.shiftInto ? p.shiftInto : p.id;
+        pl.push([p.id, Math.round(p.x), Math.round(p.y), p.dir, p.mv,
+                 p.alive ? 1 : 0, p.vent >= 0 ? 1 : 0, sh, ap]);
+      }
       this.sendTo(q, Object.assign({ pl }, base));
     }
   },
@@ -572,6 +672,8 @@ const Client = {
   modalOpen: false, lastPosSend: 0, votedFor: null, hostId: null,
   ventId: -1, sab: null, sabReadyAt: 0, ventedIds: [],
   camsOpen: false, camsWatched: false,
+  sp: "", abilityReadyAt: 0, ventReadyAt: 0,
+  shiftInto: null, shiftUntil: 0, shieldUntil: 0, vitals: null,
 
   enterLobby(code) {
     this.screen = "lobby";
@@ -606,7 +708,32 @@ const Client = {
         break;
       case "ventOk":
         this.ventId = m.v; this.me.x = m.x; this.me.y = m.y;
+        this.ventReadyAt = m.cd || 0;
         renderVentPanel();
+        break;
+      case "vitals":
+        this.vitals = m.list; this.abilityReadyAt = m.cd;
+        showVitals(m.list);
+        break;
+      case "shieldOk":
+        this.abilityReadyAt = m.cd;
+        closeAbility();
+        toast("Shielding " + m.name + " for " + (SHIELD_MS / 1000) + "s");
+        break;
+      case "shielded":
+        this.shieldUntil = m.until;
+        toast("A Guardian Angel is protecting you");
+        break;
+      case "saved":
+        toast("Your shield absorbed a kill!");
+        break;
+      case "blocked":
+        toast("Your kill was blocked — they were shielded");
+        break;
+      case "shiftOk":
+        this.shiftInto = m.into; this.shiftUntil = m.until; this.abilityReadyAt = m.cd;
+        closeAbility();
+        toast(m.into ? "Disguised as " + (this.meta[m.into] || {}).name : "Back to your own form");
         break;
       case "sabOn":
         this.sab = { type: m.s, ends: m.ends };
@@ -644,7 +771,10 @@ const Client = {
   },
 
   startGame(m) {
-    this.role = m.role; this.imps = m.imps || [];
+    this.role = m.role; this.imps = m.imps || []; this.sp = m.sp || "";
+    this.abilityReadyAt = now() + 12000; this.ventReadyAt = 0;
+    this.shiftInto = null; this.shiftUntil = 0; this.shieldUntil = 0; this.vitals = null;
+    closeAbility();
     this.tasks = m.tasks; this.doneSet = new Set();
     this.me.x = m.x; this.me.y = m.y; this.me.alive = true;
     this.usedBtn = false; this.votedFor = null;
@@ -665,14 +795,19 @@ const Client = {
     buildTaskList();
     $("killBtn").classList.toggle("hidden", this.role !== "imp");
     $("buttonBtn").classList.remove("hidden");
+    // engineers vent too
+    $("ventBtn").classList.toggle("hidden", !(this.role === "imp" || this.sp === "engineer"));
+    updateRoleChip();
     // role flash
     const rf = $("roleFlash"), tx = $("roleFlashText");
+    const spDef = SPECIALS[this.sp];
+    const extra = spDef ? "<br><span class='spname'>" + spDef.name + "</span><small>" + spDef.blurb + "</small>" : "";
     if (this.role === "imp") {
       const mates = this.imps.filter(id => id !== Net.myId).map(id => (this.meta[id] || {}).name).filter(Boolean);
       tx.innerHTML = '<span class="impclr">IMPOSTOR</span><small>Eliminate the crew. Don\'t get caught.' +
-        (mates.length ? " Partner: " + esc(mates.join(", ")) : "") + "</small>";
+        (mates.length ? " Partner: " + esc(mates.join(", ")) : "") + "</small>" + extra;
     } else {
-      tx.innerHTML = '<span class="crewclr">CREWMATE</span><small>Finish your tasks. Find the impostor.</small>';
+      tx.innerHTML = '<span class="crewclr">CREWMATE</span><small>Finish your tasks. Find the impostor.</small>' + extra;
     }
     rf.classList.remove("hidden");
     rf.style.opacity = 1;
@@ -697,7 +832,7 @@ const Client = {
     if ((this.sab && this.sab.type) !== sabWas) showSabBanner();
     const seen = new Set(), vented = [];
     for (const row of m.pl) {
-      const [id, x, y, dir, mv, alive, inVent] = row;
+      const [id, x, y, dir, mv, alive, inVent, shield, ap] = row;
       seen.add(id);
       if (inVent) vented.push(id);
       if (id === Net.myId) {
@@ -705,11 +840,14 @@ const Client = {
         this.me.alive = !!alive;
         if (wasAlive && !alive) { closeTaskModal(); closeVentPanel(); closeSabMenu(); closeCams(); }
         if (!inVent && this.ventId >= 0) { this.ventId = -1; closeVentPanel(); }
+        this.myShield = !!shield;
+        this.myLook = ap && ap !== id ? ap : null;
         continue;
       }
       let o = this.others[id];
       if (!o) o = this.others[id] = { x, y, tx: x, ty: y, dir, mv, alive: !!alive };
       o.tx = x; o.ty = y; o.dir = dir; o.mv = mv; o.alive = !!alive; o.vent = !!inVent;
+      o.shield = !!shield; o.ap = ap || id;
       if (this.phase === "meeting") { o.x = x; o.y = y; }
     }
     this.ventedIds = vented;
@@ -723,7 +861,9 @@ const Client = {
     this.bodies = []; this.meeting = null; this.others = {};
     this.me.alive = true;
     this.ventId = -1; this.sab = null; this.camsWatched = false;
-    closeVentPanel(); closeSabMenu(); closeCams(); showSabBanner();
+    this.sp = ""; this.shiftInto = null; this.shiftUntil = 0; this.myLook = null; this.myShield = false;
+    closeVentPanel(); closeSabMenu(); closeCams(); closeAbility(); showSabBanner();
+    $("roleChip").classList.add("hidden");
     $("gameWrap").classList.add("hidden");
     $("endOverlay").classList.add("hidden");
     $("meetingOverlay").classList.add("hidden");
@@ -753,7 +893,8 @@ window.addEventListener("keydown", e => {
   if (k === "r") tryReport();
   if (k === "f") tryVent();
   if (k === "x") toggleSabMenu();
-  if (k === "escape") { closeTaskModal(); closeSabMenu(); closeCams(); }
+  if (k === "c") tryAbility();
+  if (k === "escape") { closeTaskModal(); closeSabMenu(); closeCams(); closeAbility(); }
 });
 window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 
@@ -836,8 +977,9 @@ function nearestBody() {
   return best;
 }
 
+function canUseVents() { return Client.role === "imp" || Client.sp === "engineer"; }
 function nearestVent() {
-  if (Client.role !== "imp") return null;
+  if (!canUseVents()) return null;
   let best = null, bd = VENT_RANGE;
   for (const v of VENTS) {
     const d = dist(Client.me, v);
@@ -863,12 +1005,92 @@ function tryUse() {
 }
 
 function tryVent() {
-  if (Client.role !== "imp" || Client.phase !== "play" || !Client.me.alive) return;
+  if (!canUseVents() || Client.phase !== "play" || !Client.me.alive) return;
+  if (Client.ventId < 0 && Client.sp === "engineer" && now() < Client.ventReadyAt) return;
   if (Client.ventId >= 0) { Net.toHost({ t: "vent", a: "exit", v: Client.ventId }); return; }
   const v = nearestVent();
   if (v) Net.toHost({ t: "vent", a: "enter", v: v.id });
 }
 function ventJump(id) { Net.toHost({ t: "vent", a: "move", v: id }); }
+
+// ---- special role abilities ----
+function updateRoleChip() {
+  const chip = $("roleChip");
+  if (!Client.role) { chip.classList.add("hidden"); return; }
+  const spDef = SPECIALS[Client.sp];
+  const side = Client.role === "imp" ? "IMPOSTOR" : "CREWMATE";
+  chip.className = Client.role === "imp" ? "impside" : "crewside";
+  chip.innerHTML = "<b>" + side + "</b>" + (spDef ? "<span>" + spDef.name + "</span>" : "");
+  chip.classList.remove("hidden");
+}
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.remove("hidden");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add("hidden"), 3200);
+}
+
+// One button drives whichever special ability the player has.
+function abilityKind() {
+  if (Client.phase !== "play") return null;
+  if (Client.sp === "scientist" && Client.me.alive) return "vitals";
+  if (Client.sp === "angel" && !Client.me.alive) return "shield";
+  if (Client.sp === "shifter" && Client.me.alive) return Client.shiftUntil > now() ? "revert" : "shift";
+  return null;
+}
+function tryAbility() {
+  const kind = abilityKind();
+  if (!kind) return;
+  if (kind === "revert") { Net.toHost({ t: "shift", tid: null }); return; }
+  if (now() < Client.abilityReadyAt) return;
+  if (kind === "vitals") { Net.toHost({ t: "vitals" }); return; }
+  openAbilityPicker(kind);
+}
+function openAbilityPicker(kind) {
+  const box = $("abilityList");
+  box.innerHTML = "";
+  $("abilityTitle").textContent = kind === "shield" ? "Protect a crewmate" : "Disguise yourself as…";
+  const targets = Client.roster.filter(p => {
+    if (p.id === Net.myId) return false;
+    const o = Client.others[p.id];
+    return kind === "shield" ? (o && o.alive) : (o && o.alive);
+  });
+  if (!targets.length) {
+    const n = document.createElement("p");
+    n.className = "sabnote";
+    n.textContent = "No living players in range of your power.";
+    box.appendChild(n);
+  }
+  for (const p of targets) {
+    const b = document.createElement("button");
+    b.className = "sabopt";
+    b.innerHTML = '<span class="swatch" style="background:' + p.color + '"></span><b>' + esc(p.name) + "</b>";
+    b.onclick = () => Net.toHost(kind === "shield" ? { t: "shield", tid: p.id } : { t: "shift", tid: p.id });
+    box.appendChild(b);
+  }
+  Client.modalOpen = true;
+  $("abilityModal").classList.remove("hidden");
+}
+function closeAbility() {
+  if ($("abilityModal").classList.contains("hidden")) return;
+  Client.modalOpen = false;
+  $("abilityModal").classList.add("hidden");
+}
+function showVitals(list) {
+  const box = $("abilityList");
+  box.innerHTML = "";
+  $("abilityTitle").textContent = "Vitals";
+  for (const v of list) {
+    const row = document.createElement("div");
+    row.className = "vitalrow " + (v.alive ? "ok" : "dead");
+    row.innerHTML = '<span class="swatch" style="background:' + v.color + '"></span>' +
+      "<b>" + esc(v.name) + "</b><span>" + (v.alive ? "ALIVE" : "DEAD") + "</span>";
+    box.appendChild(row);
+  }
+  Client.modalOpen = true;
+  $("abilityModal").classList.remove("hidden");
+}
 
 // ---- security cameras ----
 function nearCamConsole() {
@@ -969,6 +1191,8 @@ $("ventBtn").onclick = tryVent;
 $("sabBtn").onclick = toggleSabMenu;
 $("sabClose").onclick = closeSabMenu;
 $("camClose").onclick = closeCams;
+$("abilityBtn").onclick = tryAbility;
+$("abilityClose").onclick = closeAbility;
 
 // ---- sabotage menu (impostor) ----
 function toggleSabMenu() {
@@ -1305,12 +1529,15 @@ function renderScene(camX, camY, viewW, viewH) {
   }
   rows.sort((a, b) => a.o.y - b.o.y);
   for (const { id, o } of rows) {
-    const meta = Client.meta[id] || { color: "#888", name: "?" };
+    // a shapeshifter is drawn wearing whoever they copied
+    const meta = Client.meta[o.ap || id] || { color: "#888", name: "?" };
+    if (o.shield) drawShield(o.x, o.y);
     if (o.vent) ctx.globalAlpha = 0.5;    // fellow impostor hiding in a vent
     drawBean(o.x, o.y, meta.color, o.dir, !o.alive, meta.name, o.mv);
     ctx.globalAlpha = 1;
   }
-  const myMeta = Client.meta[Net.myId] || { color: "#fff", name: "me" };
+  const myMeta = Client.meta[Client.myLook || Net.myId] || { color: "#fff", name: "me" };
+  if (Client.myShield) drawShield(Client.me.x, Client.me.y);
   if (Client.ventId >= 0) ctx.globalAlpha = 0.55;
   drawBean(Client.me.x, Client.me.y, myMeta.color, Client.me.dir, iAmDead, myMeta.name, Client.me.mv);
   ctx.globalAlpha = 1;
@@ -1396,6 +1623,17 @@ function drawBean(x, y, color, dir, ghost, name, moving) {
 }
 // A camera on a wall bracket. Its lamp turns red while anyone is on the
 // monitors — that blink is the crew's tell and the impostor's warning.
+// Guardian Angel shield — a soft dome around a protected crewmate.
+function drawShield(x, y) {
+  ctx.save();
+  const pulse = 0.35 + 0.2 * Math.sin(now() / 220);
+  ctx.globalAlpha = pulse;
+  ctx.beginPath(); ctx.arc(x, y - 4, 46, 0, 7);
+  ctx.fillStyle = "#6fe3ff"; ctx.fill();
+  ctx.globalAlpha = 0.9;
+  ctx.lineWidth = 3; ctx.strokeStyle = "#aef0ff"; ctx.stroke();
+  ctx.restore();
+}
 function drawCamera(c) {
   const live = Client.camsWatched && !(Client.sab && Client.sab.type === "comms");
   ctx.save();
@@ -1514,9 +1752,29 @@ function updateHUD() {
   const bd = nearestBody();
   $("reportBtn").disabled = !(play && alive && !vented && bd);
 
+  const canVent = Client.role === "imp" || Client.sp === "engineer";
+  if (canVent) {
+    const engCd = Client.sp === "engineer" ? Math.max(0, Client.ventReadyAt - now()) : 0;
+    $("ventBtn").disabled = !(play && alive && (vented || (nearestVent() && !engCd)));
+    $("ventBtn").innerHTML = vented ? "EXIT<small>F</small>"
+      : engCd > 0 ? "VENT<small>" + Math.ceil(engCd / 1000) + "s</small>" : "VENT<small>F</small>";
+  }
+  // special-role ability button
+  const kind = abilityKind();
+  $("abilityBtn").classList.toggle("hidden", !kind);
+  if (kind) {
+    const cd = Math.max(0, Client.abilityReadyAt - now());
+    if (kind === "revert") {
+      const left = Math.max(0, Math.ceil((Client.shiftUntil - now()) / 1000));
+      $("abilityBtn").disabled = false;
+      $("abilityBtn").innerHTML = "REVERT<small>" + left + "s</small>";
+    } else {
+      const label = kind === "vitals" ? "VITALS" : kind === "shield" ? "SHIELD" : "SHIFT";
+      $("abilityBtn").disabled = !!cd || Client.modalOpen;
+      $("abilityBtn").innerHTML = label + "<small>" + (cd > 0 ? Math.ceil(cd / 1000) + "s" : "C") + "</small>";
+    }
+  }
   if (Client.role === "imp") {
-    $("ventBtn").disabled = !(play && alive && (vented || nearestVent()));
-    $("ventBtn").innerHTML = vented ? "EXIT<small>F</small>" : "VENT<small>F</small>";
     const cd = Math.max(0, Client.sabReadyAt - now());
     $("sabBtn").disabled = !(play && alive && !Client.sab && !cd);
     $("sabBtn").innerHTML = cd > 0 ? "SABO<small>" + Math.ceil(cd / 1000) + "s</small>" : "SABO<small>X</small>";

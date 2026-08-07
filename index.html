@@ -28,7 +28,9 @@
     One player is secretly the Impostor and must eliminate the crew without getting caught.
     Impostors can slip through <b>vents</b> and trigger <b>sabotages</b> — lights, comms, or a reactor
     meltdown the crew must race to fix. Watch the <b>security cameras</b> in Security to catch them moving —
-    but every camera blinks red while you do. Report bodies or hit the emergency button to call a meeting and vote someone out.
+    but every camera blinks red while you do. Some players get <b>special roles</b> — Engineer (vents),
+    Scientist (vitals), Guardian Angel (shield a crewmate after dying), Shapeshifter (disguise as another player).
+    Report bodies or hit the emergency button to call a meeting and vote someone out.
     Move with <kbd>WASD</kbd> / arrows — or on phones and tablets, touch and drag anywhere on the map to move.
     Everyone sees the same amount of the ship, whatever their screen size. Best with 4–10 players.
   </div>
@@ -71,10 +73,21 @@
       <button id="killBtn" class="act red hidden" disabled>KILL<small>Q</small></button>
       <button id="ventBtn" class="act hidden" disabled>VENT<small>F</small></button>
       <button id="sabBtn" class="act red hidden" disabled>SABO<small>X</small></button>
+      <button id="abilityBtn" class="act gold hidden" disabled>ABILITY<small>C</small></button>
       <button id="buttonBtn" class="act hidden" disabled>MEETING</button>
     </div>
     <div id="sabBanner" class="hidden"></div>
     <div id="ventPanel" class="hidden"></div>
+    <div id="roleChip" class="hidden"></div>
+    <div id="toast" class="hidden"></div>
+  </div>
+
+  <!-- special role ability (vitals / shield / shapeshift) -->
+  <div id="abilityModal" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head"><span id="abilityTitle"></span><button id="abilityClose">✕</button></div>
+      <div id="abilityList"></div>
+    </div>
   </div>
 
   <!-- security cameras -->
